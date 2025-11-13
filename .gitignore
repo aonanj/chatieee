@@ -1,0 +1,22 @@
+
+.venv/
+__pycache__
+.DS_Store
+.env
+.env*
+__pycache__/
+copilot-instructions.md
+.instructions/
+us_patents.csv
+node_modules/
+*.csv
+.secrets/
+.next/
+.vscode/
+.ruff_cache/
+resources/
+*.log
+*.sql
+
+# Sentry Config File
+.env.sentry-build-plugin
