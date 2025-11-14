@@ -5,6 +5,8 @@ __pycache__
 .env
 .env*
 __pycache__/
+documents/
+instructions/
 copilot-instructions.md
 .instructions/
 us_patents.csv
