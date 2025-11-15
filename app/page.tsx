@@ -127,14 +127,6 @@ export default function Home() {
             <Link href="/ingest" className="btn-modern">
               Ingest a PDF
             </Link>
-            <a
-              className="btn-outline"
-              href="https://github.com/aonanj/chatieee"
-              target="_blank"
-              rel="noreferrer"
-            >
-              View GitHub
-            </a>
           </div>
         </header>
 
@@ -254,8 +246,8 @@ export default function Home() {
         )}
       </section>
 
-      <footer className="mt-8 text-center text-xs text-white/80">
-        Built with ❤️ for the IEEE knowledge base.
+      <footer className="footerStyle">
+        Built for the IEEE knowledge base.
       </footer>
     </main>
   );
