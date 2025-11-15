@@ -1,4 +1,3 @@
-# db.py
 """
 Database helpers for RAG PDF ingestion.
 
@@ -39,15 +38,108 @@ CREATE INDEX idx_rag_chunk_document_id
     ON rag_chunk (document_id);
 """
 
-import os
+import asyncio
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-import psycopg  # psycopg v3
+import psycopg
+from psycopg import OperationalError
+from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
-from utils.logger import setup_logger
+from src import config
 
-logger = setup_logger(__name__)
+logger = config.LOGGER
+_pool: AsyncConnectionPool | None = None
+_MAX_RETRIES = 5
+_BASE_BACKOFF = 0.1
+_RECOVERABLE_SUBSTRINGS: tuple[str, ...] = (
+    "ssl connection has been closed unexpectedly",
+    "server closed the connection unexpectedly",
+    "connection already closed",
+    "connection not open",
+)
 
+
+def _iter_causes(exc: BaseException) -> Iterable[BaseException]:
+    """Yield the exception and its causes."""
+    current: BaseException | None = exc
+    while current is not None:
+        yield current
+        current = current.__cause__  # type: ignore[attr-defined]
+
+def _jsonb(value: Any | None) -> Jsonb:
+    """Wrap Python values so psycopg knows they target a JSONB column."""
+    return Jsonb({} if value is None else value)
+
+async def _reset_pool(bad_pool: AsyncConnectionPool | None) -> None:
+    """Close and clear the cached pool so the next call recreates it."""
+    global _pool
+    if bad_pool is None:
+        return
+    try:
+        await bad_pool.close()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Error closing connection pool after failure: %s", exc)
+    finally:
+        _pool = None
+
+def init_pool() -> AsyncConnectionPool:
+    """Initialize a global async connection pool.
+
+    Returns:
+        A configured `AsyncConnectionPool`.
+    """
+    global _pool
+    if _pool is None:
+        dsn = config.DATABASE_URL or ""
+        _pool = AsyncConnectionPool(
+            conninfo=dsn,
+            min_size=1,
+            max_size=10,
+            kwargs={"autocommit": False},
+        )
+    return _pool
+
+async def reset_pool() -> None:
+    """Explicitly reset the cached pool."""
+    await _reset_pool(_pool)
+
+
+async def get_conn() -> AsyncIterator[psycopg.AsyncConnection]:
+    """Yield an async connection from the pool with a transaction.
+
+    Handles dropped SSL connections by recreating the pool with backoff.
+    """
+    attempt = 0
+    last_error: OperationalError | None = None
+
+    while attempt < _MAX_RETRIES:
+        pool = init_pool()
+        try:
+            async with pool.connection() as conn, conn.transaction():
+                yield conn
+            return
+        except OperationalError as exc:
+            attempt += 1
+            last_error = exc
+            if not is_recoverable_operational_error(exc):
+                raise
+            logger.warning(
+                "Recoverable database connection error (attempt %s/%s): %s",
+                attempt,
+                _MAX_RETRIES,
+                exc,
+            )
+            await _reset_pool(pool)
+            await asyncio.sleep(min(_BASE_BACKOFF * attempt, 1.0))
+        except Exception:
+            # Propagate non-connection errors immediately
+            raise
+
+    # Only reached if all attempts failed with a recoverable OperationalError
+    assert last_error is not None
+    raise last_error
 
 def get_connection() -> psycopg.Connection:
     """
@@ -55,13 +147,67 @@ def get_connection() -> psycopg.Connection:
 
     Expects DATABASE_URL to be set, e.g. the Neon connection string.
     """
-    dsn = os.environ.get("DATABASE_URL")
+    dsn = config.DATABASE_URL
     if not dsn:
         error = "DATABASE_URL environment variable is not set"
         logger.error(error)
         raise RuntimeError(error)
     return psycopg.connect(dsn)
 
+def insert_figures(
+    document_id: int,
+    figures: list[dict[str, Any]],
+) -> None:
+    """
+    Insert one or more figures for a document.
+
+    Each figure dict:
+      - figure_label: str
+      - page_number: Optional[int]
+      - caption: Optional[str]
+      - image_uri: str
+      - metadata: Optional[dict]
+    """
+    if not figures:
+        return
+
+    sql = """
+    INSERT INTO rag_figure (
+        document_id,
+        figure_label,
+        page_number,
+        caption,
+        image_uri,
+        metadata
+    ) VALUES (
+        %(document_id)s,
+        %(figure_label)s,
+        %(page_number)s,
+        %(caption)s,
+        %(image_uri)s,
+        %(metadata)s
+    )
+    ON CONFLICT (document_id, figure_label)
+    DO UPDATE SET
+        page_number = EXCLUDED.page_number,
+        caption     = EXCLUDED.caption,
+        image_uri   = EXCLUDED.image_uri,
+        metadata    = EXCLUDED.metadata;
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            for fig in figures:
+                params = {
+                    "document_id": document_id,
+                    "figure_label": fig["figure_label"],
+                    "page_number": fig.get("page_number"),
+                    "caption": fig.get("caption"),
+                    "image_uri": fig["image_uri"],
+                    "metadata": _jsonb(fig.get("metadata")),
+                }
+                cur.execute(sql, params)
+        conn.commit()
 
 def upsert_document(
     external_id: str,
@@ -77,9 +223,6 @@ def upsert_document(
 
     external_id should be a stable key (e.g., filename, or your own ID).
     """
-    if metadata is None:
-        metadata = {}
-
     sql = """
     INSERT INTO rag_document (
         external_id, title, description, source_type,
@@ -108,7 +251,7 @@ def upsert_document(
         "source_uri": source_uri,
         "checksum": checksum,
         "total_pages": total_pages,
-        "metadata": metadata,
+        "metadata": _jsonb(metadata),
     }
 
     with get_connection() as conn:
@@ -185,8 +328,21 @@ def replace_chunks(
                     "chunk_type": chunk.get("chunk_type", "body"),
                     # embedding can be None for now; you can backfill later
                     "embedding": chunk.get("embedding"),
-                    "metadata": chunk.get("metadata", {}),
+                    "metadata": _jsonb(chunk.get("metadata")),
                 }
                 cur.execute(insert_sql, params)
 
         conn.commit()
+
+def is_recoverable_operational_error(exc: BaseException) -> bool:
+    """Return True when the error represents a dropped database connection."""
+    if not isinstance(exc, psycopg.OperationalError):
+        return False
+
+    for candidate in _iter_causes(exc):
+        message = " ".join(
+            part for part in (str(candidate), getattr(candidate, "pgerror", None)) if part
+        ).lower()
+        if any(token in message for token in _RECOVERABLE_SUBSTRINGS):
+            return True
+    return False

@@ -141,7 +141,9 @@ pip install -e ".[dev]"
 Environment variables:
 - `DATABASE_URL`: PostgreSQL connection string (required)
 - `OPENAI_API_KEY`: OpenAI API key for embeddings (required)
-- `EMBEDDING_MODEL`: OpenAI model name (default: `text-embedding-3-small`)
+- `EMBEDDING_MODEL`: OpenAI model to use for embeddings generation (default: `text-embedding-3-small`)
+- `ANSWER_MODEL` = OpenAI model to use for RAG answer retrieval (default: `gpt-5-mini`)
+- `DEFAULT_VERBOSITY` = Conguration for OpenAI answer model verbositry (default: `high`)
 - `LOG_TO_FILE`: Enable file logging (default: false)
 - `LOG_FILE_PATH`: Log file location (default: `chatieee.log`)
 

@@ -15,20 +15,27 @@ This script:
   - Upserts rag_document and replaces its rag_chunk rows.
 """
 
-import argparse
+from collections.abc import Callable
 import hashlib
+from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 
 import pdfplumber
 from pdfplumber.page import Page
 
-from utils.database import replace_chunks, upsert_document
-from utils.logger import setup_logger
+from src import config
+from src.ingest.embed_and_update_chunks import embed_and_update_chunks
+from src.utils.database import insert_figures, replace_chunks, upsert_document
+from src.utils.storage import upload_image_fn
 
-logger = setup_logger(__name__)
+logger = config.LOGGER
 
-MAX_CHARS_PER_BODY_CHUNK = 1800  # adjust as needed
+MAX_CHARS_PER_BODY_CHUNK = 1800
+
+FIGURE_RE = re.compile(r"\b(FIG(?:URE)?\.?\s*\d+[A-Z]?)", re.IGNORECASE)
+
 
 
 def compute_checksum(path: str) -> str:
@@ -123,6 +130,73 @@ def extract_table_texts(page: Page) -> list[dict[str, Any]]:
 
     return table_chunks
 
+def extract_figures_from_pdf(
+    pdf_path: str,
+    document_id: int,
+    upload_image_fn: Callable[[bytes, str], str],
+) -> None:
+    """
+    Extract figure images and captions from the PDF and insert into rag_figure.
+
+    upload_image_fn(image_bytes, suggested_name) -> image_uri
+    """
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            # pdfplumber’s image metadata
+            for idx, img in enumerate(page.images):
+                bbox = (img["x0"], img["top"], img["x1"], img["bottom"])
+
+                # Crop to image
+                cropped = page.crop(bbox).to_image(resolution=150)
+                buffer = BytesIO()
+                cropped.save(buffer, format="PNG")
+                image_bytes = buffer.getvalue()
+
+                suggested_name = f"doc{document_id}_p{page_num}_img{idx}.png"
+                image_uri = upload_image_fn(image_bytes, suggested_name)
+
+                caption_box = (
+                    bbox[0],
+                    bbox[3],
+                    bbox[2],
+                    bbox[3] + 60,
+                )
+                caption_text = page.within_bbox(caption_box).extract_text() or ""
+
+                # Try to extract a canonical figure label
+                m = FIGURE_RE.search(caption_text)
+                figure_label = None
+                if m:
+                    figure_label = normalise_figure_label(m.group(1))
+                else:
+                    # Fallback: first FIG.* on page
+                    page_text = page.extract_text() or ""
+                    m2 = FIGURE_RE.search(page_text)
+                    if m2:
+                        figure_label = normalise_figure_label(m2.group(1))
+
+                if not figure_label:
+                    # You can choose to skip unlabelled images or assign synthetic IDs
+                    continue
+
+                insert_figures(
+                    document_id=document_id,
+                    figures=[{
+                        "figure_label": figure_label,
+                        "page_number": page_num,
+                        "caption": caption_text.strip(),
+                        "image_uri": image_uri,
+                        "metadata": {},
+                    }],
+                )
+
+def normalise_figure_label(raw: str) -> str:
+    """Normalise 'Fig 3', 'FIGURE 3A' -> 'FIG. 3', 'FIG. 3A'."""
+    cleaned = " ".join(raw.replace("FIGURE", "FIG.").replace("Fig", "FIG.").split())
+    if not cleaned.upper().startswith("FIG."):
+        cleaned = "FIG. " + cleaned.split()[-1]
+    return cleaned.upper()
 
 def build_chunks_from_pdf(path: str) -> list[dict[str, Any]]:
     """
@@ -232,56 +306,25 @@ def build_chunks_from_pdf(path: str) -> list[dict[str, Any]]:
                 )
                 chunk_index += 1
 
-        # You might want to store num_pages somewhere; we return only chunks here.
-        # Caller can separately track total_pages via the pdf object.
-
     return chunks
 
+def ingest_pdf(pdf_path: str = "documents/*.pdf",
+               external_id: str | None = None,
+               title: str | None = None,
+               description: str | None = None,
+               source_uri: str | None = None) -> None:
+    """Ingest a PDF document, chunk it, store in DB, and extract figures."""
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest and chunk a PDF into Neon/Postgres.")
-    parser.add_argument("pdf_path", type=str, help="Path to the PDF file to ingest.")
-    parser.add_argument(
-        "--external-id",
-        type=str,
-        default=None,
-        help="Stable external ID for the document (default: basename of PDF).",
-    )
-    parser.add_argument(
-        "--title",
-        type=str,
-        default=None,
-        help="Title for the document (default: basename without extension).",
-    )
-    parser.add_argument(
-        "--description",
-        type=str,
-        default=None,
-        help="Optional description of the document.",
-    )
-    parser.add_argument(
-        "--source-uri",
-        type=str,
-        default=None,
-        help="Optional URI/URL where the source PDF lives (e.g., S3 URL).",
-    )
-
-    args = parser.parse_args()
-
-    pdf_path = args.pdf_path
     if not Path(pdf_path).is_file():
         error = f"PDF file not found: {pdf_path}"
         logger.error(error)
         raise FileNotFoundError(error)
 
-    external_id = args.external_id or Path(pdf_path).name
-    title = args.title or Path(pdf_path).stem
-    description = args.description
-    source_uri = args.source_uri
+    external_id = external_id or Path(pdf_path).name
+    title = title or Path(pdf_path).stem
 
     checksum = compute_checksum(pdf_path)
 
-    # Open once to count pages
     with pdfplumber.open(pdf_path) as pdf:
         total_pages = len(pdf.pages)
 
@@ -302,11 +345,17 @@ def main() -> None:
     # Upsert chunks (replace all existing chunks for this document)
     replace_chunks(document_id=document_id, chunks=chunks)
 
+    # Inside your main ingestion flow, after document_id is known
+
+    extract_figures_from_pdf(
+        pdf_path=pdf_path,
+        document_id=document_id,
+        upload_image_fn=upload_image_fn,
+    )
+
     log_info = f"Ingested document_id={document_id}, total_pages={total_pages}"
     logger.info(log_info)
     log_info = f"chunks_inserted={len(chunks)}"
     logger.info(log_info)
 
-
-if __name__ == "__main__":
-    main()
+    embed_and_update_chunks()

@@ -7,6 +7,7 @@ This document outlines the database schema for the project. The database is a **
 * [public.rag_document](#publicrag_document)
 * [public.rag_document_page](#publicrag_document_page)
 * [public.rag_chunk](#publicrag_chunk)
+* [public.rag_figure](#publicrag_figure)
 * [public.rag_ingestion_run](#publicrag_ingestion_run)
 
 ---
@@ -91,11 +92,13 @@ Stores chunks and embeddings correspondings to documents in `rag_documents`.
 | `embedding` | `vector(1536)` | true | |
 | `metadata` | `jsonb` | not null | '{}'::jsonb |
 | `created_at` | `timestamp with time zone` | not null | `now()` |
+| `content_tsv` | `tsvector` | true | generated always as `(to_tsvector('english'::regconfig, COALESCE(content, ''::text)))` stored |
 
 
 ### Indexes
 
 * `rag_chunk_pkey` PRIMARY KEY, btree `(id)`
+* `idx_rag_chunk_content_tsv_gin` gin `(content_tsv)`
 * `idx_rag_chunk_document_id` btree `(document_id)`
 * `idx_rag_chunk_document_index` UNIQUE, btree `(document_id, chunk_index)`
 * `idx_rag_chunk_embedding_ivfflat` ivfflat `(embedding)` WITH `(lists='100')`
@@ -103,6 +106,35 @@ Stores chunks and embeddings correspondings to documents in `rag_documents`.
 ### Foreign-key constraints
 
 * `rag_chunk_document_id_fkey` FOREIGN KEY `(document_id)` REFERENCES `rag_document(id)` ON DELETE CASCADE
+
+---
+
+## public.rag_figure
+
+Stores the information about the figures, including the URIs, in each document in `rag_document`. 
+
+### Columns
+
+| Column | Type | Nullable | Default |
+| :--- | :--- | :--- | :--- |
+| `id` | `bigint` | not null | `nextval('rag_figure_id_seq'::regclass)` |
+| `document_id` | `bigint` | not null | |
+| `figure_label` | `bigint` | not null | |
+| `page_number` | `integer` | not null | |
+| `caption` | `text` | true | |
+| `image_uri` | `text` | not null | |
+| `metadata` | `jsonb` | not null | '{}'::jsonb |
+| `created_at` | `timestamp with time zone` | not null | `now()` |
+
+
+### Indexes
+
+* `rag_figure_pkey` PRIMARY KEY, btree `(id)`
+* `idx_rag_figure_doc_label` UNIQUE, btree `(document_id, figure_label)`
+
+### Foreign-key constraints
+
+* `rag_figure_document_id_fkey` FOREIGN KEY `(document_id)` REFERENCES `rag_document(id)` ON DELETE CASCADE
 
 ---
 

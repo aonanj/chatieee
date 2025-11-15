@@ -4,6 +4,10 @@ from pathlib import Path
 import sys
 import tempfile
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 _loggers = {}
 
 def setup_logger(name="chatieee", level=logging.INFO, tofile=False, filename="chatieee.log"):
@@ -32,10 +36,10 @@ def setup_logger(name="chatieee", level=logging.INFO, tofile=False, filename="ch
         return logger
 
     # Determine if file logging is requested via param or env
-    env_to_file = os.getenv("LOG_TO_FILE", str(tofile)).lower() in {"1", "true", "yes", "on"}
-    target_file = os.getenv("LOG_FILE_PATH", filename)
+    env_to_file = os.getenv("LOG_TO_FILE", "false").lower() in {"1", "true", "yes", "on"}
+    target_file = os.getenv("LOG_FILE_PATH", "chatieee.log") if filename is None else filename
 
-    if env_to_file:
+    if env_to_file and target_file:
         # Resolve a writable path. HF Spaces code dir (/app) may be read-only; prefer /data then /tmp
         candidate_paths = [Path(target_file).parent, ".", "/data", tempfile.gettempdir()]
 
@@ -57,9 +61,10 @@ def setup_logger(name="chatieee", level=logging.INFO, tofile=False, filename="ch
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)
             except PermissionError:
-                logger.error("File logging disabled: no write permission for %s", final_path)
+                logger.exception("File logging disabled: no write permission for %s", final_path)
             except OSError as e:
-                logger.error("File logging disabled: %s", e)
+                log_exception = f"File logging disabled: OS error for {final_path}: {e}"
+                logger.exception(log_exception)
         else:
             logger.error("File logging disabled: no writable directory found for %s", target_file)
 
