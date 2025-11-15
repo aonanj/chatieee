@@ -70,12 +70,12 @@ class LLMReranker:
             return self._fallback(candidates)
         prompt = self._build_prompt(query, candidates)
         try:
-            if not self._client:
-                raise RuntimeError("OpenAI client is not available")
-            response = self._client.responses.create(
-                model=self.model,
-                input=prompt
-            )
+            response = None
+            if self._client is not None:
+                response = self._client.responses.create(
+                    model=self.model,
+                    input=prompt
+                )
             output = getattr(response, "output_text", None)
             if not output:
                 output = response.output[0].content[0].text  # type: ignore[attr-defined]
@@ -90,6 +90,10 @@ class LLMReranker:
                 rest = [c for c in candidates if c.rerank_score is None]
                 rest.sort(key=lambda c: (c.vector_score or 0.0) + (c.lexical_score or 0.0), reverse=True)
                 return remaining + rest
+        except RuntimeError as exc:
+            error = f"OpenAI client is not available: {exc}"
+            logger.exception(error)
+            raise RuntimeError(error) from exc
         except Exception as exc:  # pragma: no cover - API failure path
             logger.warning("LLM reranker failed, falling back to heuristic ranking", exc_info=exc)
         return self._fallback(candidates)
@@ -106,17 +110,21 @@ class LLMReranker:
 
     def _build_prompt(self, query: str, candidates: list[ChunkMatch]) -> str:
         lines = [
-            "You are a legal research assistant. Rank the provided passages by their usefulness",
+            "You are a language model designed to evaluate the responses of this documentation query system.",
+            "You will use a rating scale of 0 to 10, 0 being poorest response and 10 being the best.",
+            "Responses with “not specified” or “no specific mention” or “rephrase question” or “unclear” or no documents returned or empty response are considered poor responses.",
+            "Responses where the question appears to be answered are considered good.",
+            "Responses that contain detailed answers are considered the best.",
+            "Also, use your own judgement in analyzing if the question asked is actually answered in the response. Remember that a response that contains a request to “rephrase the question” is usually a non-response.",
+            "Please rate the question/response pair entered. Only respond with the rating. No explanation necessary. Only integers.",
             "for answering the user's question. Return a JSON object with a 'ranking' array",
-            "containing {\"id\": chunk_id, \"score\": relevance} objects in descending order.",
+            "containing {“id”: chunk_id, “score”: relevance} objects in descending order.",
             "Query:",
             query.strip(),
             "\nPassages:",
         ]
-        for _, candidate in enumerate(candidates, start=1):
+        for candidate in candidates:
             snippet = candidate.content.strip().replace("\n", " ")
-            if len(snippet) > 600:
-                snippet = snippet[:600] + "…"
             lines.append(f"[{candidate.id}] {snippet}")
         return "\n".join(lines)
 
@@ -124,10 +132,14 @@ class LLMReranker:
 class AnswerGenerator:
     def __init__(self, model: str | None = None, verbosity: str | None = None) -> None:
         if not OpenAI:
-            raise RuntimeError("OpenAI SDK is required to generate answers")
-        api_key = os.getenv("OPENAI_API_KEY")
+            error = "OpenAI SDK is not installed, cannot generate answers"
+            logger.error(error)
+            raise RuntimeError(error)
+        api_key = config.OPENAI_API_KEY
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY must be set to generate answers")
+            error = "OPENAI_API_KEY must be set to generate answers"
+            logger.error(error)
+            raise RuntimeError(error)
         self._client = OpenAI(api_key=api_key)
         self.model = model or config.ANSWER_MODEL
         self.verbosity = verbosity or config.DEFAULT_VERBOSITY
@@ -142,7 +154,7 @@ class AnswerGenerator:
         try:
             response = self._client.responses.create(model=self.model, input=prompt)
         except Exception as exc:  # pragma: no cover - network failure path
-            logger.error("Failed to generate answer from OpenAI", exc_info=exc)
+            logger.exception("Failed to generate answer from OpenAI: %s", exc_info=exc)
             return "Unable to generate an answer at this time."
         answer = getattr(response, "output_text", None)
         if not answer:
@@ -201,7 +213,7 @@ class AnswerGenerator:
         "3. Do not invent section numbers, clause numbers, or page numbers that are not present in the context.\n"
         "4. Be concise and precise; prefer quoting short exact definitions or sentences from the context.\n"
         "5. If the context is contradictory or ambiguous, explain the ambiguity instead of guessing.\n"
-        "6. If related figures are provided for a context, mention them explicitly (e.g., \"As shown in FIG. 3 …\"). Do not invent figures that are not listed.\n\n"
+        "6. If related figures are provided for a context, mention them explicitly (e.g., “As shown in FIG. 3 …”). Do not invent figures that are not listed.\n\n"
         "You are given several labeled source snippets from one or more PDF documents.\n\n"
         "Context snippets:\n"
         f"{context_snippets}\n\n"
@@ -343,8 +355,7 @@ def get_figures_for_chunks(
         params.extend([doc_id, label])
 
     matches: list[FigureMatch] = []
-    with psycopg.connect(conninfo) as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
+    with psycopg.connect(conninfo) as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(_sql.SQL(sql), params) # type: ignore
             for row in cur:
                 matches.append(

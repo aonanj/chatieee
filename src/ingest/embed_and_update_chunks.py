@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any
 
 import psycopg
 from psycopg import sql as _sql

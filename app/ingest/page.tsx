@@ -2,15 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { buildClientApiUrl } from "@/app/lib/api";
 
 type IngestResponse = {
   status: string;
   document_path?: string;
   message?: string;
 };
+
+const ingestEndpoint = buildClientApiUrl("/ingest_pdf");
 
 export default function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,10 +24,13 @@ export default function IngestPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResponse | null>(null);
+  const [lastUploaded, setLastUploaded] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] ?? null;
     setFile(nextFile);
+    setLastUploaded(null);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -37,7 +42,7 @@ export default function IngestPage() {
 
     setIsUploading(true);
     setError(null);
-    setStatus("Uploading PDF and starting ingestion...");
+    setStatus("Uploading PDF and starting ingestion…");
     setResult(null);
 
     try {
@@ -56,7 +61,7 @@ export default function IngestPage() {
         formData.append("source_uri", sourceUri.trim());
       }
 
-      const response = await fetch(`${API_BASE_URL}/ingest_pdf`, {
+      const response = await fetch(ingestEndpoint, {
         method: "POST",
         body: formData,
       });
@@ -85,8 +90,9 @@ export default function IngestPage() {
 
       setResult(payload);
       setStatus("PDF ingested successfully. Embeddings are ready.");
+      setLastUploaded(file.name);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unexpected error while ingesting the PDF.";
+      const message = err instanceof Error ? err.message : "Unexpected error while ingesting.";
       setError(message);
       setResult(null);
       setStatus(null);
@@ -96,123 +102,229 @@ export default function IngestPage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center px-5 py-10 text-white">
-      <section className="glass-surface w-full max-w-4xl rounded-3xl px-8 py-10">
-        <header className="mb-6 flex flex-col items-center gap-3 text-center">
-          <Image
-            src="/images/chatieee-logo-white.png"
-            alt="ChatIEEE logo"
-            width={200}
-            height={48}
-          />
-          <p className="text-base text-slate-200">
-            Upload new IEEE PDFs and send them to the ingestion pipeline.
-          </p>
-          <Link href="/" className="btn-outline">
-            ← Back to Query
-          </Link>
-        </header>
-
-        <form onSubmit={handleSubmit} className="glass-card flex flex-col gap-5 px-6 py-6 text-gray-900">
-          <div>
-            <label className="text-sm font-semibold text-slate-600">Select PDF document</label>
-            <input
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={handleFileChange}
-              disabled={isUploading}
-              className="mt-2 block w-full rounded-2xl border border-white/50 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-lg"
+    <main className="page-gradient min-h-screen px-6 py-10 text-slate-900">
+      <div className="app-wrapper">
+        <section className="nav-card flex flex-col gap-6 rounded-3xl border border-white/50 bg-white/30 px-8 py-6 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/images/chatieee-logo-white.png"
+              alt="ChatIEEE logo"
+              width={180}
+              height={42}
+              className="drop-shadow-lg"
+              priority
             />
-            <p className="mt-2 text-xs text-slate-500">
-              {file ? file.name : "No file selected yet."}
-            </p>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-600">ChatIEEE Suite</p>
+              <p className="text-sm text-slate-700">Upload + Orchestrate ingestion</p>
+            </div>
           </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link href="/" className="btn-outline">
+              ← Back to Query
+            </Link>
+            <a
+              className="btn-modern min-w-[150px]"
+              href="mailto:support@phaethon.llc"
+            >
+              Need help?
+            </a>
+          </div>
+        </section>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col text-sm text-slate-600">
+        <section className="surface-panel hero-panel space-y-8 rounded-[34px] border border-white/60 px-10 py-10">
+          <header className="flex flex-col gap-2 text-left">
+            <p className="section-tag">Ingestion Overview</p>
+            <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
+              Stage PDFs into the documents/ workspace
+            </h1>
+            <p className="max-w-3xl text-sm text-slate-600 md:text-base">
+              Upload IEEE PDFs, persist them under <code>documents/</code>, chunk the text, and
+              trigger embedding so new material is instantly searchable.
+            </p>
+          </header>
+          <div className="grid gap-6 sm:grid-cols-3">
+            <div className="metric-card">
+              <p className="metric-label">Last Upload</p>
+              <p className="metric-value">{lastUploaded ?? "No uploads yet"}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Status</p>
+              <p className="metric-value">{status ?? "Idle"}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Stored Path</p>
+              <p className="metric-value text-sm">
+                {result?.document_path ?? "Awaiting ingestion"}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <form onSubmit={handleSubmit} className="surface-panel rounded-[34px] border border-white/70 px-10 py-10 space-y-8">
+          <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="section-tag">Upload PDF</p>
+              <p className="text-lg font-semibold text-slate-900">Attach document metadata</p>
+            </div>
+            <span className="status-chip">
+              {isUploading ? "Ingestion running…" : "Standing by"}
+            </span>
+          </header>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={handleFileChange}
+            className="hidden"
+            id="pdf-upload"
+          />
+
+          <label
+            htmlFor="pdf-upload"
+            className="upload-zone block cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-slate-600"
+          >
+            <p className="text-base font-semibold text-slate-800">Drop PDF here or click to browse</p>
+            <p className="mt-1 text-xs text-slate-500">Max 50 MB · Stored under documents/</p>
+            <p className="mt-3 text-sm text-slate-600">
+              {file ? file.name : "No file selected"}
+            </p>
+          </label>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <label className="field-label">
               External ID
               <input
                 type="text"
-                className="mt-2 rounded-2xl border border-white/50 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-lg"
+                className="input-pill mt-2"
                 placeholder="ieee-802-2024"
                 value={externalId}
                 disabled={isUploading}
                 onChange={(event) => setExternalId(event.target.value)}
               />
             </label>
-            <label className="flex flex-col text-sm text-slate-600">
+            <label className="field-label">
               Title
               <input
                 type="text"
-                className="mt-2 rounded-2xl border border-white/50 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-lg"
+                className="input-pill mt-2"
                 placeholder="IEEE 802.11 Standard 2024"
                 value={title}
                 disabled={isUploading}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
+            <label className="field-label md:col-span-2">
+              Description
+              <textarea
+                className="textarea-pill mt-2"
+                placeholder="Optional description for this document."
+                value={description}
+                disabled={isUploading}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+            <label className="field-label md:col-span-2">
+              Source URL (optional)
+              <input
+                type="url"
+                className="input-pill mt-2"
+                placeholder="https://standards.ieee.org/..."
+                value={sourceUri}
+                disabled={isUploading}
+                onChange={(event) => setSourceUri(event.target.value)}
+              />
+            </label>
           </div>
 
-          <label className="flex flex-col text-sm text-slate-600">
-            Description
-            <textarea
-              className="mt-2 min-h-[90px] rounded-2xl border border-white/50 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-lg"
-              placeholder="Optional description for this document."
-              value={description}
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className="btn-modern min-w-[180px]" disabled={isUploading || !file}>
+              {isUploading ? "Ingesting…" : "Upload & Ingest"}
+            </button>
+            <button
+              type="button"
+              className="btn-outline"
               disabled={isUploading}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </label>
+              onClick={() => {
+                setFile(null);
+                setExternalId("");
+                setTitle("");
+                setDescription("");
+                setSourceUri("");
+                setResult(null);
+                setStatus(null);
+                setError(null);
+                setLastUploaded(null);
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                }
+              }}
+            >
+              Reset Form
+            </button>
+          </div>
 
-          <label className="flex flex-col text-sm text-slate-600">
-            Source URL (optional)
-            <input
-              type="url"
-              className="mt-2 rounded-2xl border border-white/50 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-lg"
-              placeholder="https://standards.ieee.org/..."
-              value={sourceUri}
-              disabled={isUploading}
-              onChange={(event) => setSourceUri(event.target.value)}
-            />
-          </label>
+          {error && (
+            <div className="alert-card error mt-6">
+              {error}
+            </div>
+          )}
 
-          <button type="submit" className="btn-modern mt-2 self-end px-8" disabled={isUploading || !file}>
-            {isUploading ? "Ingesting..." : "Upload & Ingest"}
-          </button>
+          {status && !error && (
+            <div className="alert-card info">
+              {status}
+            </div>
+          )}
+
+          {result && !error && (
+            <div className="panel-sub text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">
+                {result.message ?? "Ingestion finished."}
+              </p>
+              {result.document_path && (
+                <p className="mt-1 text-slate-600">
+                  Stored at: <code>{result.document_path}</code>
+                </p>
+              )}
+            </div>
+          )}
         </form>
 
-        <div className="mt-6 space-y-4 text-sm text-slate-100">
-          <p>
-            Documents are stored under <span className="font-semibold">documents/</span> before chunking and embedding.
-          </p>
-          <ul className="list-disc space-y-1 pl-5 text-slate-200">
-            <li>The ingestion endpoint extracts text, tables, and figures.</li>
-            <li>Chunks are embedded immediately so they become searchable.</li>
-            <li>Re-uploading a PDF updates the existing document when the checksum matches.</li>
-          </ul>
-        </div>
-
-        {error && (
-          <div className="glass-card mt-6 border border-red-200 bg-red-50/80 px-5 py-4 text-sm text-red-800">
-            {error}
+        <section className="surface-panel rounded-[34px] border border-white/70 px-10 py-10">
+          <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="section-tag">Pipeline Notes</p>
+              <p className="text-xl font-semibold text-slate-900">What happens after upload?</p>
+            </div>
+          </header>
+          <div className="mt-8 grid gap-6 md:grid-cols-3">
+            {[
+              {
+                title: "Checksum tracking",
+                description: "Documents are deduplicated so re-uploads update the same record.",
+              },
+              {
+                title: "Chunk + Embed",
+                description: "Body + table chunks are created and embeddings generated immediately.",
+              },
+              {
+                title: "Figure capture",
+                description: "Figures are extracted into rag_figure with captions and links.",
+              },
+            ].map((card) => (
+              <div key={card.title} className="figure-card space-y-2 text-sm text-slate-600">
+                <p className="text-base font-semibold text-slate-900">{card.title}</p>
+                <p>{card.description}</p>
+              </div>
+            ))}
           </div>
-        )}
+        </section>
 
-        {status && !error && (
-          <div className="glass-card mt-6 border border-indigo-200 bg-white/70 px-5 py-3 text-sm text-slate-600">
-            {status}
-          </div>
-        )}
-
-        {result && !error && (
-          <div className="glass-card mt-6 border border-emerald-200 bg-white/85 px-6 py-5 text-sm text-gray-900">
-            <p className="font-semibold text-slate-800">{result.message ?? "Ingestion finished."}</p>
-            {result.document_path && (
-              <p className="mt-1 text-slate-600">Stored at: <code>{result.document_path}</code></p>
-            )}
-          </div>
-        )}
-      </section>
+        <footer className="rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-slate-600 backdrop-blur-xl">
+          2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
+        </footer>
+      </div>
     </main>
   );
 }

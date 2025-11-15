@@ -41,6 +41,8 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
     "http://127.0.0.1:3000",
     "https://localhost:3000",
     "https://127.0.0.1:3000",
+    "https://localhost:8000",
+    "https://127.0.0.1:8000",
     "https://localhost:5174",
     "https://127.0.0.1:5174",
 ]

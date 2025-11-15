@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { buildClientApiUrl } from "@/app/lib/api";
 
 type Chunk = {
   id: number;
@@ -46,12 +46,15 @@ const metadataValue = (
   return undefined;
 };
 
+const queryEndpoint = buildClientApiUrl("/query");
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QueryResponse | null>(null);
+  const [lastRun, setLastRun] = useState<Date | null>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -63,10 +66,10 @@ export default function Home() {
 
     setIsLoading(true);
     setError(null);
-    setStatus("Searching indexed documents...");
+    setStatus("Analyzing IEEE knowledge base…");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/query`, {
+      const response = await fetch(queryEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmed }),
@@ -96,9 +99,11 @@ export default function Home() {
       }
 
       setResult(payload);
+      setLastRun(new Date());
       setStatus("Answer generated from the latest knowledge base.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unexpected error while answering your question.";
+      const message =
+        err instanceof Error ? err.message : "Unexpected error while answering your question.";
       setError(message);
       setResult(null);
       setStatus(null);
@@ -107,148 +112,244 @@ export default function Home() {
     }
   };
 
+  const handleReset = () => {
+    setQuery("");
+    setResult(null);
+    setStatus(null);
+    setError(null);
+    setLastRun(null);
+  };
+
   const topChunks = result?.chunks?.slice(0, 4) ?? [];
+  const lastRunLabel = lastRun
+    ? lastRun.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "No runs yet";
 
   return (
-    <main className="flex min-h-screen flex-col items-center px-5 py-10 text-white">
-      <section className="glass-surface w-full max-w-5xl rounded-3xl px-8 py-10">
-        <header className="mb-8 flex flex-col items-center gap-4 text-center">
-          <Image
-            src="/images/chatieee-logo-white.png"
-            alt="ChatIEEE logo"
-            width={240}
-            height={60}
-            priority
-          />
-          <p className="max-w-2xl text-base text-slate-200">
-            Ask questions about the IEEE Corpus and receive sourced answers generated from your ingested PDFs.
-          </p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <Link href="/ingest" className="btn-modern">
-              Ingest a PDF
-            </Link>
-          </div>
-        </header>
-
-        <form onSubmit={handleSubmit} className="glass-card mx-auto flex max-w-3xl flex-col gap-4 px-6 py-6 text-gray-900">
-          <label className="text-sm font-semibold text-slate-600">
-            Ask a question
-          </label>
-          <textarea
-            className="min-h-[120px] rounded-2xl border border-white/50 bg-white/70 p-4 text-base text-slate-800 shadow-lg outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-            placeholder="e.g. What changes were introduced in the 2024 revision of section 9.4?"
-            value={query}
-            disabled={isLoading}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-sm text-slate-500">
-              Answers cite snippets pulled directly from your ingested PDFs.
-            </span>
-            <button type="submit" className="btn-modern min-w-[180px]" disabled={isLoading}>
-              {isLoading ? "Generating..." : "Get Answer"}
-            </button>
-          </div>
-        </form>
-
-        {error && (
-          <div className="glass-card mt-6 border border-red-200 bg-red-50/70 px-5 py-4 text-sm text-red-800">
-            {error}
-          </div>
-        )}
-
-        {status && !error && (
-          <div className="glass-card mt-6 border border-indigo-100 bg-white/70 px-5 py-3 text-sm text-slate-600">
-            {status}
-          </div>
-        )}
-
-        {result && !error && (
-          <div className="mt-8 grid gap-6">
-            <div className="glass-card border border-white/50 bg-white/85 px-7 py-6 text-gray-900 shadow-2xl">
-              <h2 className="text-lg font-semibold text-slate-800">Answer</h2>
-              <p className="mt-3 whitespace-pre-line text-base leading-relaxed text-slate-700">
-                {result.answer}
-              </p>
+    <main className="page-gradient min-h-screen px-4 py-8 text-slate-900">
+      <div className="app-wrapper">
+        <section className="nav-card flex flex-col gap-4 rounded-3xl border border-white/50 bg-white/30 px-6 py-4 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/images/chatieee-logo-white.png"
+              alt="ChatIEEE logo"
+              width={180}
+              height={42}
+              className="drop-shadow-lg"
+              priority
+            />
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-600">ChatIEEE Suite</p>
+              <p className="text-sm text-slate-700">Retrieve + Analyze your IEEE Corpus</p>
             </div>
-
-            {topChunks.length > 0 && (
-              <div className="glass-card border border-white/50 bg-white/80 px-7 py-6 text-gray-900">
-                <h3 className="text-base font-semibold text-slate-800">Supporting Sources</h3>
-                <div className="mt-4 space-y-4">
-                  {topChunks.map((chunk, index) => {
-                    const headingValue =
-                      metadataValue(chunk.metadata, "section") ??
-                      metadataValue(chunk.metadata, "heading") ??
-                      metadataValue(chunk.metadata, "title");
-                    const pageValue =
-                      metadataValue(chunk.metadata, "page_start") ??
-                      metadataValue(chunk.metadata, "page") ??
-                      metadataValue(chunk.metadata, "page_number");
-
-                    return (
-                      <article
-                        key={chunk.id}
-                        className="rounded-3xl border border-slate-100 bg-white/90 p-4 shadow-lg"
-                      >
-                        <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="font-semibold text-slate-700">Source {index + 1}</span>
-                          <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-wide">
-                            <span>Document #{chunk.document_id}</span>
-                            {pageValue && <span>Page {pageValue}</span>}
-                          </div>
-                        </div>
-                        {headingValue && typeof headingValue === "string" && (
-                          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {headingValue}
-                          </p>
-                        )}
-                        <p className="mt-3 text-sm leading-relaxed text-slate-700">
-                          {chunk.content}
-                        </p>
-                      </article>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {result.figures?.length ? (
-              <div className="glass-card border border-white/50 bg-white/85 px-7 py-6 text-gray-900">
-                <h3 className="text-base font-semibold text-slate-800">Figures Mentioned</h3>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  {result.figures.map((figure) => (
-                    <div
-                      key={figure.id}
-                      className="rounded-2xl border border-slate-100 bg-white/90 p-4 text-sm"
-                    >
-                      <div className="flex items-center justify-between text-xs text-slate-500">
-                        <span className="font-semibold text-slate-700">{figure.figure_label}</span>
-                        {figure.page_number && <span>Page {figure.page_number}</span>}
-                      </div>
-                      {figure.caption && (
-                        <p className="mt-2 text-slate-700">{figure.caption}</p>
-                      )}
-                      <a
-                        href={figure.image_uri}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 inline-flex text-xs font-semibold text-blue-600 underline"
-                      >
-                        View Image
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
-        )}
-      </section>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Link href="/ingest" className="btn-modern min-w-[150px]">
+              Ingest PDFs
+            </Link>
+            <a
+              className="btn-outline"
+              href="https://github.com/aonanj/chatieee"
+              target="_blank"
+              rel="noreferrer"
+            >
+              View Docs
+            </a>
+          </div>
+        </section>
 
-      <footer className="footerStyle">
-        Built for the IEEE knowledge base.
-      </footer>
+        <section className="surface-panel hero-panel space-y-6 rounded-[34px] border border-white/60 px-8 py-8">
+          <header className="flex flex-col gap-2 text-left">
+            <p className="section-tag">IEEE Knowledge Overview</p>
+            <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
+              Density &amp; Distribution Insights
+            </h1>
+            <p className="max-w-3xl text-sm text-slate-600 md:text-base">
+              Measure saturation across IEEE standards, surface semantic neighbors, and cite the
+              exact clauses supporting every answer.
+            </p>
+          </header>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="metric-card">
+              <p className="metric-label">Last Run</p>
+              <p className="metric-value">{lastRunLabel}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Sources Queried</p>
+              <p className="metric-value">{result?.chunks?.length ?? 0}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Figure References</p>
+              <p className="metric-value">{result?.figures?.length ?? 0}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="surface-panel rounded-[34px] border border-white/70 px-8 py-8">
+          <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="section-tag">Focus Question</p>
+              <p className="text-lg font-semibold text-slate-900">What do you want to learn?</p>
+            </div>
+            <span className="status-chip">
+              {error ? "Disconnected" : "Connected to ingestion pipeline"}
+            </span>
+          </header>
+
+          <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-5">
+            <textarea
+              className="textarea-pill w-full"
+              placeholder="e.g. Summarize the security updates introduced in IEEE 802.11-2024 clause 12."
+              value={query}
+              disabled={isLoading}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+                <label className="toggle-pill">
+                  <input type="checkbox" checked readOnly />
+                  <span>Return supporting sources</span>
+                </label>
+                <label className="toggle-pill">
+                  <input type="checkbox" checked readOnly />
+                  <span>Reference figures when detected</span>
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" className="btn-outline min-w-[120px]" onClick={handleReset}>
+                  Reset
+                </button>
+                <button type="submit" className="btn-modern min-w-[180px]" disabled={isLoading}>
+                  {isLoading ? "Generating…" : "Generate Answer"}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {error && (
+            <div className="alert-card error mt-6">
+              {error}
+            </div>
+          )}
+
+          {status && !error && (
+            <div className="alert-card info mt-6">
+              {status}
+            </div>
+          )}
+        </section>
+
+        <section className="surface-panel rounded-[34px] border border-white/70 px-8 py-8">
+          <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="section-tag">Results</p>
+              <p className="text-xl font-semibold text-slate-900">Contextual Answer + Sources</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="status-chip">
+                {result ? `${result.chunks.length} chunks referenced` : "Awaiting first query"}
+              </span>
+              <span className="status-chip neutral">
+                {result?.figures?.length ? `${result.figures.length} figures linked` : "No figures"}
+              </span>
+            </div>
+          </header>
+
+          {result ? (
+            <div className="mt-6 space-y-6">
+              <div className="panel-sub">
+                <h2 className="text-lg font-semibold text-slate-900">Answer</h2>
+                <p className="mt-3 whitespace-pre-line text-base leading-relaxed text-slate-700">
+                  {result.answer}
+                </p>
+              </div>
+
+              {topChunks.length > 0 && (
+                <div className="panel-sub space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-slate-900">Supporting Sources</h3>
+                    <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                      Top {topChunks.length} snippets
+                    </p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {topChunks.map((chunk, index) => {
+                      const headingValue =
+                        metadataValue(chunk.metadata, "section") ??
+                        metadataValue(chunk.metadata, "heading") ??
+                        metadataValue(chunk.metadata, "title");
+                      const pageValue =
+                        metadataValue(chunk.metadata, "page_start") ??
+                        metadataValue(chunk.metadata, "page") ??
+                        metadataValue(chunk.metadata, "page_number");
+
+                      return (
+                        <article key={chunk.id} className="result-card">
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span className="font-semibold text-slate-700">Source {index + 1}</span>
+                            <div className="flex gap-2">
+                              <span className="status-chip mini">Doc #{chunk.document_id}</span>
+                              {pageValue && <span className="status-chip mini">Page {pageValue}</span>}
+                            </div>
+                          </div>
+                          {headingValue && typeof headingValue === "string" && (
+                            <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+                              {headingValue}
+                            </p>
+                          )}
+                          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                            {chunk.content}
+                          </p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {result.figures?.length ? (
+                <div className="panel-sub space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-slate-900">Figures Referenced</h3>
+                    <p className="text-xs text-slate-500">Linked directly from rag_figure</p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    {result.figures.map((figure) => (
+                      <div key={figure.id} className="figure-card">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
+                          <span className="font-semibold text-slate-700">
+                            {figure.figure_label}
+                          </span>
+                          {figure.page_number && <span>Page {figure.page_number}</span>}
+                        </div>
+                        {figure.caption && (
+                          <p className="mt-2 text-sm text-slate-700">{figure.caption}</p>
+                        )}
+                        <a
+                          href={figure.image_uri}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-3 inline-flex text-xs font-semibold text-blue-600 underline"
+                        >
+                          View Figure
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="panel-sub mt-6 text-sm text-slate-600">
+              Submit a question to preview sourced answers and figures.
+            </div>
+          )}
+        </section>
+
+        <footer className="rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-slate-600 backdrop-blur-xl">
+          2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
+        </footer>
+      </div>
     </main>
   );
 }
