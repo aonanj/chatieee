@@ -1,27 +1,32 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+import firebase_admin
+from firebase_admin import credentials
 import psycopg
 from pydantic import BaseModel
 
-from src.utils.database import  get_conn, init_pool
 from src.ingest.pdf_ingest import ingest_pdf
+from src.utils.database import get_conn, init_pool
+
 from .query import answer_query
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     load_dotenv()
+    cred = credentials.Certificate("path/to/serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
     pool = init_pool()
     try:
         yield
