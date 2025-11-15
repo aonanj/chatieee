@@ -28,6 +28,8 @@ charset-normalizer==3.4.4
     # via
     #   pdfminer-six
     #   requests
+click==8.3.1
+    # via uvicorn
 cryptography==46.0.3
     # via
     #   pdfminer-six
@@ -79,7 +81,9 @@ grpcio==1.76.0
 grpcio-status==1.76.0
     # via google-api-core
 h11==0.16.0
-    # via httpcore
+    # via
+    #   httpcore
+    #   uvicorn
 h2==4.3.0
     # via httpx
 hpack==4.1.0
@@ -150,6 +154,8 @@ pypdfium2==5.0.0
     # via pdfplumber
 python-dotenv==1.2.1
     # via dotenv
+python-multipart==0.0.20
+    # via -r requirements.in
 requests==2.32.5
     # via
     #   cachecontrol
@@ -178,3 +184,5 @@ typing-inspection==0.4.2
     # via pydantic
 urllib3==2.5.0
     # via requests
+uvicorn==0.38.0
+    # via -r requirements.in

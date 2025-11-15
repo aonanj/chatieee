@@ -126,9 +126,9 @@ export default function Home() {
     : "No runs yet";
 
   return (
-    <main className="page-gradient min-h-screen px-4 py-8 text-slate-900">
+    <main className="page-gradient min-h-screen px-6 py-10 text-slate-900">
       <div className="app-wrapper">
-        <section className="nav-card flex flex-col gap-4 rounded-3xl border border-white/50 bg-white/30 px-6 py-4 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
+        <section className="nav-card flex flex-col gap-6 rounded-3xl border border-white/50 bg-white/30 px-8 py-6 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <Image
               src="/images/chatieee-logo-white.png"
@@ -158,7 +158,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="surface-panel hero-panel space-y-6 rounded-[34px] border border-white/60 px-8 py-8">
+        <section className="surface-panel hero-panel space-y-10 rounded-[34px] border border-white/60 px-10 py-10">
           <header className="flex flex-col gap-2 text-left">
             <p className="section-tag">IEEE Knowledge Overview</p>
             <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
@@ -169,7 +169,7 @@ export default function Home() {
               exact clauses supporting every answer.
             </p>
           </header>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-8 sm:grid-cols-3">
             <div className="metric-card">
               <p className="metric-label">Last Run</p>
               <p className="metric-value">{lastRunLabel}</p>
@@ -185,7 +185,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="surface-panel rounded-[34px] border border-white/70 px-8 py-8">
+        <section className="surface-panel rounded-[34px] border border-white/70 px-10 py-10 space-y-6">
           <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="section-tag">Focus Question</p>
@@ -196,7 +196,7 @@ export default function Home() {
             </span>
           </header>
 
-          <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-5">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-6">
             <textarea
               className="textarea-pill w-full"
               placeholder="e.g. Summarize the security updates introduced in IEEE 802.11-2024 clause 12."
@@ -227,19 +227,19 @@ export default function Home() {
           </form>
 
           {error && (
-            <div className="alert-card error mt-6">
+            <div className="alert-card error">
               {error}
             </div>
           )}
 
           {status && !error && (
-            <div className="alert-card info mt-6">
+            <div className="alert-card info">
               {status}
             </div>
           )}
         </section>
 
-        <section className="surface-panel rounded-[34px] border border-white/70 px-8 py-8">
+        <section className="surface-panel rounded-[34px] border border-white/70 px-10 py-10 space-y-6">
           <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="section-tag">Results</p>
@@ -256,7 +256,7 @@ export default function Home() {
           </header>
 
           {result ? (
-            <div className="mt-6 space-y-6">
+            <div className="space-y-8">
               <div className="panel-sub">
                 <h2 className="text-lg font-semibold text-slate-900">Answer</h2>
                 <p className="mt-3 whitespace-pre-line text-base leading-relaxed text-slate-700">

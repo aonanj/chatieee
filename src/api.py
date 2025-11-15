@@ -25,7 +25,7 @@ from .query import answer_query
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     load_dotenv()
-    cred = credentials.Certificate("path/to/serviceAccountKey.json")
+    cred = credentials.Certificate(".secrets/chat-ieee-firebase-adminsdk-fbsvc-c934ac1c68.json")
     firebase_admin.initialize_app(cred)
     pool = init_pool()
     try:
@@ -74,12 +74,12 @@ async def healthz() -> dict[str, str]:
 
 @app.post("/ingest_pdf", tags=["Ingestion"])
 async def ingest_pdf_endpoint(
+    conn: Conn,
     pdf: UploadFile = File(...),
     external_id: str | None = Form(None),
     title: str | None = Form(None),
     description: str | None = Form(None),
-    source_uri: str | None = Form(None),
-    conn: Conn = Depends(),
+    source_uri: str | None = Form(None)
 ) -> dict[str, str]:
     """Persist an uploaded PDF and ingest it into the system."""
     del conn  # Ensures dependency is evaluated for connection health checks.
@@ -137,7 +137,7 @@ async def ingest_pdf_endpoint(
     }
 
 @app.post("/query", tags=["Query"])
-async def query_endpoint(payload: QueryRequest, conn: Conn = Depends()) -> dict[str, Any]:
+async def query_endpoint(payload: QueryRequest, conn: Conn) -> dict[str, Any]:
     """Answer a natural language question using ingested documents."""
     del conn  # Ensures dependency runs even though synchronous helpers are used elsewhere.
 
