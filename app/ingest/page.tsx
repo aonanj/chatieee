@@ -1,7 +1,5 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
 import { ChangeEvent, FormEvent, useRef, useState } from "react";
 
 import { buildClientApiUrl } from "@/app/lib/api";

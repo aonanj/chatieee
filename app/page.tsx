@@ -1,10 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { buildClientApiUrl } from "@/app/lib/api";
+import { resolveStorageUrl } from "@/app/lib/firebase-storage";
 
 type Chunk = {
   id: number;
@@ -25,25 +25,26 @@ type Figure = {
   page_number?: number | null;
 };
 
+type PageSource = {
+  id: number;
+  document_id: number;
+  page_number: number;
+  image_uri?: string | null;
+  metadata: Record<string, unknown> | null;
+  chunk_ids: number[];
+  rank: number;
+};
+
 type QueryResponse = {
   answer: string;
   chunks: Chunk[];
+  pages: PageSource[];
   figures: Figure[];
 };
 
-const metadataValue = (
-  metadata: Chunk["metadata"],
-  key: string,
-): string | number | undefined => {
-  if (!metadata || typeof metadata !== "object") {
-    return undefined;
-  }
-  const record = metadata as Record<string, unknown>;
-  const value = record[key];
-  if (typeof value === "string" || typeof value === "number") {
-    return value;
-  }
-  return undefined;
+type StorageLinkState = {
+  status: "loading" | "ready" | "error";
+  url?: string;
 };
 
 const queryEndpoint = buildClientApiUrl("/query");
@@ -55,6 +56,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QueryResponse | null>(null);
   const [lastRun, setLastRun] = useState<Date | null>(null);
+  const [pageLinks, setPageLinks] = useState<Record<number, StorageLinkState>>({});
+  const [figureLinks, setFigureLinks] = useState<Record<number, StorageLinkState>>({});
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -118,9 +121,111 @@ export default function Home() {
     setStatus(null);
     setError(null);
     setLastRun(null);
+    setPageLinks({});
+    setFigureLinks({});
   };
 
-  const topChunks = result?.chunks?.slice(0, 4) ?? [];
+  useEffect(() => {
+    const pages = result?.pages ?? [];
+    if (!pages.length) {
+      setPageLinks({});
+      return;
+    }
+
+    const initialState = pages.reduce<Record<number, StorageLinkState>>((acc, page) => {
+      acc[page.id] = { status: "loading" };
+      return acc;
+    }, {});
+    setPageLinks(initialState);
+
+    let cancelled = false;
+    const resolveLinks = async () => {
+      const resolutions = await Promise.all(
+        pages.map(async (page) => {
+          try {
+            const url = await resolveStorageUrl(page.image_uri);
+            if (url) {
+              return [page.id, { status: "ready", url }] as const;
+            }
+            return [page.id, { status: "error" }] as const;
+          } catch (err) {
+            console.error("Failed to resolve page link", err);
+            return [page.id, { status: "error" }] as const;
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setPageLinks((prev) => {
+        const nextState = { ...prev };
+        for (const [id, payload] of resolutions) {
+          nextState[id] = payload;
+        }
+        return nextState;
+      });
+    };
+
+    void resolveLinks();
+    return () => {
+      cancelled = true;
+    };
+  }, [result?.pages]);
+
+  useEffect(() => {
+    const figures = result?.figures ?? [];
+    if (!figures.length) {
+      setFigureLinks({});
+      return;
+    }
+
+    const initialState = figures.reduce<Record<number, StorageLinkState>>((acc, fig) => {
+      acc[fig.id] = { status: "loading" };
+      return acc;
+    }, {});
+    setFigureLinks(initialState);
+
+    let cancelled = false;
+    const resolveLinks = async () => {
+      const resolutions = await Promise.all(
+        figures.map(async (figure) => {
+          try {
+            const url = await resolveStorageUrl(figure.image_uri);
+            if (url) {
+              return [figure.id, { status: "ready", url }] as const;
+            }
+            return [figure.id, { status: "error" }] as const;
+          } catch (err) {
+            console.error("Failed to resolve figure link", err);
+            return [figure.id, { status: "error" }] as const;
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+      setFigureLinks((prev) => {
+        const nextState = { ...prev };
+        for (const [id, payload] of resolutions) {
+          nextState[id] = payload;
+        }
+        return nextState;
+      });
+    };
+
+    void resolveLinks();
+    return () => {
+      cancelled = true;
+    };
+  }, [result?.figures]);
+
+  const chunkSubset = result?.chunks?.slice(0, 4) ?? [];
+  const highlightedChunkIds = new Set(chunkSubset.map((chunk) => chunk.id));
+  const rankedPages = result?.pages ?? [];
+  const relevantPages = rankedPages.filter((page) =>
+    page.chunk_ids.some((id) => highlightedChunkIds.has(id)),
+  );
+  const topPageSources = (relevantPages.length ? relevantPages : rankedPages).slice(0, 4);
   const lastRunLabel = lastRun
     ? lastRun.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "No runs yet";
@@ -148,8 +253,8 @@ export default function Home() {
                 <p className="metric-value">{lastRunLabel}</p>
               </div>
               <div className="metric-card">
-                <p className="metric-label">Sources Queried</p>
-                <p className="metric-value">{result?.chunks?.length ?? 0}</p>
+                <p className="metric-label">Page Sources</p>
+                <p className="metric-value">{result?.pages?.length ?? 0}</p>
               </div>
               <div className="metric-card">
                 <p className="metric-label">Figure References</p>
@@ -223,7 +328,7 @@ export default function Home() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <span className="status-chip">
-                  {result ? `${result.chunks.length} chunks referenced` : "No sections"}
+                  {result ? `${result.pages.length} page sources` : "No pages"}
                 </span>
                 <span className="status-chip">
                   {result?.figures?.length ? `${result.figures.length} figures linked` : "No figures"}
@@ -240,42 +345,68 @@ export default function Home() {
                   </p>
                 </div>
 
-                {topChunks.length > 0 && (
+                {topPageSources.length > 0 && (
                   <div className="panel-sub space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-base font-semibold text-slate-900">Supporting Sources</h3>
                       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                        Top {topChunks.length} snippets
+                        Top {topPageSources.length} page previews
                       </p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      {topChunks.map((chunk, index) => {
-                        const headingValue =
-                          metadataValue(chunk.metadata, "section") ??
-                          metadataValue(chunk.metadata, "heading") ??
-                          metadataValue(chunk.metadata, "title");
-                        const pageValue =
-                          metadataValue(chunk.metadata, "page_start") ??
-                          metadataValue(chunk.metadata, "page") ??
-                          metadataValue(chunk.metadata, "page_number");
+                      {topPageSources.map((page, index) => {
+                        const linkState = pageLinks[page.id];
+                        const chunkCount = page.chunk_ids.length;
+                        const chunkLabel =
+                          chunkCount === 1 ? "Referenced by 1 chunk" : `Referenced by ${chunkCount} chunks`;
+                        const readyLink = linkState?.status === "ready" ? linkState.url : null;
 
                         return (
-                          <article key={chunk.id} className="result-card">
+                          <article key={`page-${page.id}`} className="result-card space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-500">
                               <span className="font-semibold text-slate-700">Source {index + 1}</span>
                               <div className="flex gap-2">
-                                <span className="status-chip mini">Doc #{chunk.document_id}</span>
-                                {pageValue && <span className="status-chip mini">Page {pageValue}</span>}
+                                <span className="status-chip mini">Doc #{page.document_id}</span>
+                                <span className="status-chip mini">Page {page.page_number}</span>
                               </div>
                             </div>
-                            {headingValue && typeof headingValue === "string" && (
-                              <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
-                                {headingValue}
-                              </p>
-                            )}
-                            <p className="mt-3 text-sm leading-relaxed text-slate-700">
-                              {chunk.content}
-                            </p>
+                            <div className="mt-1 flex h-64 w-full items-center justify-center overflow-hidden rounded-2xl bg-white/70 px-2 py-2 shadow-inner">
+                              {readyLink ? (
+                                <div className="relative h-full w-full">
+                                  <Image
+                                    src={readyLink}
+                                    alt={`Document ${page.document_id} page ${page.page_number}`}
+                                    fill
+                                    sizes="(min-width: 768px) 50vw, 100vw"
+                                    className="rounded-xl border border-slate-200 bg-white object-contain"
+                                    priority={index === 0}
+                                  />
+                                </div>
+                              ) : linkState?.status === "loading" ? (
+                                <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
+                                  Rendering preview…
+                                </div>
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
+                                  Preview unavailable
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span>{chunkLabel}</span>
+                              {readyLink ? (
+                                <a
+                                  href={readyLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-blue-600 underline"
+                                >
+                                  Open page
+                                </a>
+                              ) : (
+                                <span className="text-slate-400">No link</span>
+                              )}
+                            </div>
                           </article>
                         );
                       })}
@@ -301,14 +432,25 @@ export default function Home() {
                           {figure.caption && (
                             <p className="mt-2 text-sm text-slate-700">{figure.caption}</p>
                           )}
-                          <a
-                            href={figure.image_uri}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-3 inline-flex text-xs font-semibold text-blue-600 underline"
-                          >
-                            View Figure
-                          </a>
+                          {figureLinks[figure.id]?.status === "ready" &&
+                          figureLinks[figure.id]?.url ? (
+                            <a
+                              href={figureLinks[figure.id]?.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-3 inline-flex text-xs font-semibold text-blue-600 underline"
+                            >
+                              View Figure
+                            </a>
+                          ) : figureLinks[figure.id]?.status === "loading" ? (
+                            <span className="mt-3 inline-flex text-xs font-semibold text-slate-400">
+                              Resolving link…
+                            </span>
+                          ) : (
+                            <span className="mt-3 inline-flex text-xs font-semibold text-slate-400">
+                              Link unavailable
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>

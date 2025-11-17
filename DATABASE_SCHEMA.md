@@ -12,9 +12,9 @@ This document outlines the database schema for the project. The database is a **
 
 ---
 
-## public.documents
+## public.rag_document
 
-Stores the core documents data. Tracks each PDF once, with metadata to support dedupe, re-ingest, and provenance.
+Stores the core document data. Tracks each PDF once, with metadata to support dedupe, re-ingest, and provenance.
 
 ### Columns
 
@@ -57,7 +57,7 @@ Stores the pages in each document in `rag_document`. Used for: debug parsing; re
 | `id` | `bigint` | not null | `nextval('rag_document_page_id_seq'::regclass)` |
 | `document_id` | `bigint` | not null | |
 | `page_number` | `integer` | not null | |
-| `text` | `text` | true | |
+| `image_uri` | `text` | true | |
 | `metadata` | `jsonb` | not null | '{}'::jsonb |
 | `created_at` | `timestamp with time zone` | not null | `now()` |
 
@@ -75,7 +75,7 @@ Stores the pages in each document in `rag_document`. Used for: debug parsing; re
 
 ## public.rag_chunk
 
-Stores chunks and embeddings correspondings to documents in `rag_documents`.
+Stores chunks and embeddings corresponding to document in `rag_document`.
 
 ### Columns
 
@@ -146,7 +146,7 @@ Logs document ingestion runs. Used for: ingestion idempotency; debugging.
 
 | Column | Type | Nullable | Default |
 | :--- | :--- | :--- | :--- |
-| `id` | `bigint` | not null | `nextval('rag_document_id_seq'::regclass)` |
+| `id` | `bigint` | not null | `get_random_uuid()` |
 | `document_id` | `bigint` | not null | |
 | `status` | `text` | not null | |
 | `error_message` | `text` | true | |

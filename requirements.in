@@ -1,5 +1,6 @@
 dotenv>=0.9.9
 fastapi>=0.121.2
+firebase>=4.0.1
 firebase-admin>=7.1.0
 google-cloud-storage>=3.5.0
 openai>=2.8.0

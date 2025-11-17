@@ -334,6 +334,48 @@ def replace_chunks(
 
         conn.commit()
 
+
+def replace_document_pages(
+    document_id: int,
+    pages: list[dict[str, Any]],
+) -> None:
+    """
+    Replace rag_document_page rows for a document with the provided payload.
+
+    Each page dict should include:
+      - page_number: int
+      - image_uri: str
+      - metadata: dict[str, Any] | None
+    """
+    delete_sql = "DELETE FROM rag_document_page WHERE document_id = %(document_id)s;"
+    insert_sql = """
+    INSERT INTO rag_document_page (
+        document_id,
+        page_number,
+        image_uri,
+        metadata
+    ) VALUES (
+        %(document_id)s,
+        %(page_number)s,
+        %(image_uri)s,
+        %(metadata)s
+    );
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(delete_sql, {"document_id": document_id})
+            for page in pages:
+                params = {
+                    "document_id": document_id,
+                    "page_number": page["page_number"],
+                    "image_uri": page["image_uri"],
+                    "metadata": _jsonb(page.get("metadata")),
+                }
+                cur.execute(insert_sql, params)
+        conn.commit()
+
+
 def is_recoverable_operational_error(exc: BaseException) -> bool:
     """Return True when the error represents a dropped database connection."""
     if not isinstance(exc, psycopg.OperationalError):

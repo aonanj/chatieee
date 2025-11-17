@@ -14,6 +14,7 @@ ChatIEEE is an intelligent retrieval system to search IEEE 802.11 standard docum
 
 ### Document Processing
 - **PDF Ingestion**: Parse PDF documents with `pdfplumber` to extract text, tables, and figures
+- **Strikeout Filtering**: Ignore strikethrough annotations so deleted text never reaches the chunker
 - **Smart Chunking**: Automatically chunk documents into semantically meaningful segments (~1800 chars)
 - **Structure Tracking**: Extract and preserve document structure (headings, sections, page numbers)
 - **Table Extraction**: Separate handling of tabular data with markdown-like representation
@@ -320,6 +321,12 @@ pip install -e ".[dev]"
 
 #### Frontend (`.env.local`)
 - `NEXT_PUBLIC_API_BASE_URL`: Backend API URL (default: `http://localhost:8000`)
+- `NEXT_PUBLIC_FIREBASE_API_KEY`: Firebase web API key used to initialize the Storage client
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`: Firebase auth domain (e.g., `your-project.firebaseapp.com`)
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`: Firebase project ID
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`: Firebase storage bucket (e.g., `chat-ieee.firebasestorage.app`)
+- `NEXT_PUBLIC_FIREBASE_APP_ID`: Firebase app ID
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`: Messaging sender ID (optional, but recommended to keep configs aligned)
 
 ## Database Setup
 

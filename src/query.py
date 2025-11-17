@@ -34,6 +34,8 @@ FIGURE_RE = re.compile(
 class ChunkMatch:
     id: int
     document_id: int
+    page_start: int | None
+    page_end: int | None
     content: str
     metadata: dict[str, Any]
     vector_score: float | None = None
@@ -43,6 +45,8 @@ class ChunkMatch:
         return {
             "id": self.id,
             "document_id": self.document_id,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
             "content": self.content,
             "metadata": self.metadata,
             "vector_score": self.vector_score,
@@ -70,6 +74,28 @@ class FigureMatch:
             "caption": self.caption,
             "image_uri": self.image_uri,
             "metadata": self.metadata,
+        }
+
+
+@dataclass(slots=True)
+class PageMatch:
+    id: int
+    document_id: int
+    page_number: int
+    image_uri: str | None
+    metadata: dict[str, Any]
+    chunk_ids: list[int]
+    rank: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "document_id": self.document_id,
+            "page_number": self.page_number,
+            "image_uri": self.image_uri,
+            "metadata": self.metadata,
+            "chunk_ids": self.chunk_ids,
+            "rank": self.rank,
         }
 
 class LLMReranker:
@@ -284,7 +310,7 @@ class AnswerGenerator:
 
 class HybridRetriever:
     VECTOR_QUERY = """
-        SELECT id, document_id, content, metadata,
+        SELECT id, document_id, page_start, page_end, content, metadata,
                1 - (embedding <=> %(embedding)s::vector) AS similarity,
                (embedding <=> %(embedding)s::vector) AS distance
           FROM rag_chunk
@@ -293,7 +319,7 @@ class HybridRetriever:
          LIMIT %(limit)s
     """
     LEXICAL_QUERY = """
-        SELECT id, document_id, content, metadata,
+        SELECT id, document_id, page_start, page_end, content, metadata,
                ts_rank_cd(content_tsv, plainto_tsquery('english', %(query)s)) AS rank
           FROM rag_chunk
          WHERE content_tsv @@ plainto_tsquery('english', %(query)s)
@@ -328,6 +354,8 @@ class HybridRetriever:
                 ChunkMatch(
                     id=row["id"],
                     document_id=row["document_id"],
+                    page_start=row.get("page_start"),
+                    page_end=row.get("page_end"),
                     content=row["content"],
                     metadata=row.get("metadata") or {},
                     vector_score=row["similarity"],
@@ -344,6 +372,8 @@ class HybridRetriever:
                 ChunkMatch(
                     id=row["id"],
                     document_id=row["document_id"],
+                    page_start=row.get("page_start"),
+                    page_end=row.get("page_end"),
                     content=row["content"],
                     metadata=row.get("metadata") or {},
                     lexical_score=row["rank"],
@@ -379,6 +409,77 @@ def normalise_figure_label(raw: str) -> str:
     if not cleaned.upper().startswith("FIG."):
         cleaned = "FIG. " + cleaned.split()[-1]
     return cleaned.upper()
+
+def get_pages_for_chunks(
+    conninfo: str,
+    chunks: list[ChunkMatch],
+) -> list[PageMatch]:
+    if not chunks:
+        return []
+
+    chunk_order = {chunk.id: idx for idx, chunk in enumerate(chunks)}
+    page_requirements: dict[tuple[int, int], set[int]] = {}
+    page_rank: dict[tuple[int, int], int] = {}
+
+    for chunk in chunks:
+        if chunk.page_start is None and chunk.page_end is None:
+            continue
+        start = chunk.page_start or chunk.page_end
+        end = chunk.page_end or chunk.page_start or start
+        if start is None:
+            continue
+        if end is None or end < start:
+            end = start
+        for page_number in range(start, end + 1):
+            key = (chunk.document_id, page_number)
+            if key not in page_requirements:
+                page_requirements[key] = set()
+            page_requirements[key].add(chunk.id)
+            page_rank[key] = min(page_rank.get(key, chunk_order[chunk.id]), chunk_order[chunk.id])
+
+    if not page_requirements:
+        logger.info("No page coverage detected for retrieved chunks")
+        return []
+
+    values = ",".join(["(%s, %s)"] * len(page_requirements))
+    sql = f"""
+        WITH requested(document_id, page_number) AS (
+            VALUES {values}
+        )
+        SELECT p.id, p.document_id, p.page_number, p.image_uri, p.metadata
+          FROM rag_document_page p
+          JOIN requested r
+            ON p.document_id = r.document_id
+           AND p.page_number = r.page_number
+    """
+
+    params: list[Any] = []
+    for doc_id, page_number in page_requirements:
+        params.extend([doc_id, page_number])
+
+    matches: list[PageMatch] = []
+    with psycopg.connect(conninfo) as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(_sql.SQL(sql), params)  # type: ignore[arg-type]
+        for row in cur:
+            key = (row["document_id"], row["page_number"])
+            related_chunks = sorted(
+                page_requirements.get(key, set()),
+                key=lambda cid: chunk_order.get(cid, float("inf")),
+            )
+            matches.append(
+                PageMatch(
+                    id=row["id"],
+                    document_id=row["document_id"],
+                    page_number=row["page_number"],
+                    image_uri=row.get("image_uri"),
+                    metadata=row.get("metadata") or {},
+                    chunk_ids=related_chunks,
+                    rank=page_rank.get(key, len(chunks)),
+                )
+            )
+
+    matches.sort(key=lambda m: (m.rank, m.document_id, m.page_number))
+    return matches
 
 def get_figures_for_chunks(
     conninfo: str,
@@ -439,6 +540,8 @@ def answer_query(query: str):
     retriever = HybridRetriever(conninfo=database_url, embedder=embedder, reranker=reranker)
     results = retriever.search(query, vector_k=config.VECTOR_K, lexical_k=config.LEXICAL_K, final_k=config.TOP_K)
     logger.info("Retrieved %s candidate chunks for query '%s'", len(results), query)
+    pages = get_pages_for_chunks(database_url, results)
+    logger.info("Retrieved %s page images related to the chunks", len(pages))
     figures = get_figures_for_chunks(database_url, results)
     logger.info("Retrieved %s figures related to the chunks", len(figures))
     try:
@@ -447,6 +550,7 @@ def answer_query(query: str):
         payload = {
             "answer": answer,
             "chunks": [r.to_dict() for r in results],
+            "pages": [p.to_dict() for p in pages],
             "figures": [f.to_dict() for f in figures],
         }
         logger.info("Generated answer for query '%s'", query)
@@ -456,6 +560,7 @@ def answer_query(query: str):
         payload = {
             "error": error,
             "chunks": [r.to_dict() for r in results],
+            "pages": [p.to_dict() for p in pages],
             "figures": [f.to_dict() for f in figures],
         }
 

@@ -32,10 +32,21 @@ def _sanitize_name(name: str) -> str:
     base = base.replace("\\", "/").split("/")[-1]
     base = re.sub(r"[^a-z0-9._-]+", "-", base)
     base = base.strip("-")
-    return base or "figure"
+    return base or "asset"
 
 
-def upload_image_fn(image_bytes: bytes, suggested_name: str) -> str:
+def _sanitize_folder(folder: str | None) -> str:
+    """Restrict folder names to safe characters and fall back to 'figures'."""
+    if not folder:
+        return "figures"
+    cleaned = re.sub(r"[^a-z0-9/_-]+", "-", folder.strip().lower())
+    cleaned = cleaned.strip("/-")
+    if not cleaned:
+        return "figures"
+    return cleaned
+
+
+def upload_image_fn(image_bytes: bytes, suggested_name: str, folder: str = "figures") -> str:
     """
     Upload a PNG image to Firebase (GCS) and return a gs:// URI.
 
@@ -43,6 +54,11 @@ def upload_image_fn(image_bytes: bytes, suggested_name: str) -> str:
       - GOOGLE_APPLICATION_CREDENTIALS is set to a service account JSON
         that has storage.objects.create on the bucket.
       - FIREBASE_STORAGE_BUCKET (optional) overrides the default bucket.
+
+    Args:
+        image_bytes: Raw PNG bytes to upload.
+        suggested_name: Human-friendly identifier (used in the object name).
+        folder: Storage folder prefix (e.g., "figures", "pages").
 
     Returns:
       e.g. 'gs://chat-ieee.firebasestorage.app/figures/<uuid>_name.png'
@@ -56,8 +72,8 @@ def upload_image_fn(image_bytes: bytes, suggested_name: str) -> str:
     bucket = client.bucket(bucket_name)
 
     safe_name = _sanitize_name(suggested_name)
-    object_name = f"figures/{uuid.uuid4().hex}_{safe_name}"
-
+    safe_folder = _sanitize_folder(folder)
+    object_name = f"{safe_folder}/{uuid.uuid4().hex}_{safe_name}"
 
     blob = bucket.blob(object_name)
     try:

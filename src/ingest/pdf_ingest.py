@@ -15,7 +15,7 @@ This script:
   - Upserts rag_document and replaces its rag_chunk rows.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import hashlib
 from io import BytesIO
 from pathlib import Path
@@ -27,7 +27,12 @@ from pdfplumber.page import Page
 
 from src import config
 from src.ingest.embed_and_update_chunks import embed_and_update_chunks
-from src.utils.database import insert_figures, replace_chunks, upsert_document
+from src.utils.database import (
+    insert_figures,
+    replace_chunks,
+    replace_document_pages,
+    upsert_document,
+)
 from src.utils.storage import upload_image_fn
 
 logger = config.LOGGER
@@ -279,7 +284,7 @@ def _persist_figure(
     figure_label: str,
     caption_text: str,
     image_bytes: bytes,
-    upload_image_fn: Callable[[bytes, str], str],
+    upload_image_fn: Callable[..., str],
 ) -> None:
     """Upload the rendered figure and insert into rag_figure."""
     safe_label = re.sub(r"[^A-Za-z0-9]+", "_", figure_label).strip("_") or "figure"
@@ -299,7 +304,48 @@ def _persist_figure(
         ],
     )
 
+def _render_full_page(page: Page, resolution: int = 180) -> bytes:
+    """Render a full PDF page to PNG bytes."""
+    snapshot = page.to_image(resolution=resolution)
+    buffer = BytesIO()
+    snapshot.save(buffer, format="PNG")
+    return buffer.getvalue()
 
+
+def persist_document_pages(
+    pdf_path: str,
+    document_id: int,
+    upload_image_fn: Callable[..., str],
+    resolution: int = 180,
+) -> None:
+    """Render and upload each page, then upsert rag_document_page rows."""
+    page_payloads: list[dict[str, Any]] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            logger.info("Rendering page image for document_id=%d page=%d", document_id, page_num)
+            try:
+                image_bytes = _render_full_page(page, resolution=resolution)
+            except Exception as exc:
+                error = f"Failed to render page {page_num}: {exc}"
+                logger.exception(error)
+                raise RuntimeError(error) from exc
+
+            suggested_name = f"doc{document_id}_page_{page_num:04d}.png"
+            image_uri = upload_image_fn(image_bytes, suggested_name, folder="pages")
+            page_payloads.append(
+                {
+                    "page_number": page_num,
+                    "image_uri": image_uri,
+                    "metadata": {
+                        "width": float(page.width),
+                        "height": float(page.height),
+                        "rotation": getattr(page, "rotation", 0),
+                        "resolution": resolution,
+                    },
+                }
+            )
+
+    replace_document_pages(document_id=document_id, pages=page_payloads)
 
 
 def compute_checksum(path: str) -> str:
@@ -321,6 +367,137 @@ def clean_text(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
+STRIKEOUT_BBOX_PADDING = 1.5
+
+
+def _normalize_bbox(coords: Sequence[float]) -> tuple[float, float, float, float] | None:
+    """Normalize a 4-value coordinate sequence into a bbox tuple."""
+    if len(coords) < 4:
+        return None
+    x0, y0, x1, y1 = (float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3]))
+    left = min(x0, x1)
+    right = max(x0, x1)
+    top = min(y0, y1)
+    bottom = max(y0, y1)
+    if right - left <= 0 or bottom - top <= 0:
+        return None
+    return (left, top, right, bottom)
+
+
+def _expand_bbox(
+    bbox: tuple[float, float, float, float],
+    page_width: float,
+    page_height: float,
+    padding: float = STRIKEOUT_BBOX_PADDING,
+) -> tuple[float, float, float, float]:
+    x0, top, x1, bottom = bbox
+    pad = max(0.0, float(padding))
+    return (
+        max(0.0, x0 - pad),
+        max(0.0, top - pad),
+        min(page_width, x1 + pad),
+        min(page_height, bottom + pad),
+    )
+
+
+def _quadpoints_to_boxes(quadpoints: Sequence[float] | Sequence[Sequence[float]]) -> list[tuple[float, float, float, float]]:
+    boxes: list[tuple[float, float, float, float]] = []
+    if not isinstance(quadpoints, Sequence):
+        return boxes
+
+    if quadpoints and isinstance(quadpoints[0], Sequence):  # type: ignore[index]
+        quad_sets = quadpoints  # already grouped
+    else:
+        flat = [float(value) for value in quadpoints]  # type: ignore[arg-type]
+        if len(flat) % 8 != 0:
+            return boxes
+        quad_sets = [flat[i : i + 8] for i in range(0, len(flat), 8)]
+
+    for quad in quad_sets:
+        if len(quad) < 8:
+            continue
+        xs = [float(quad[idx]) for idx in range(0, len(quad), 2)]
+        ys = [float(quad[idx]) for idx in range(1, len(quad), 2)]
+        bbox = _normalize_bbox((min(xs), min(ys), max(xs), max(ys)))
+        if bbox:
+            boxes.append(bbox)
+    return boxes
+
+
+def _annotation_boxes_from_strikeout(annot: dict[str, Any], page: Page) -> list[tuple[float, float, float, float]]:
+    boxes: list[tuple[float, float, float, float]] = []
+    quadpoints = annot.get("quadpoints") or annot.get("QuadPoints")
+    if quadpoints:
+        boxes.extend(_quadpoints_to_boxes(quadpoints))
+
+    rect = annot.get("rect") or annot.get("Rect")
+    if rect:
+        bbox = _normalize_bbox(rect)
+        if bbox:
+            boxes.append(bbox)
+    elif all(key in annot for key in ("x0", "top", "x1", "bottom")):
+        bbox = _normalize_bbox((annot["x0"], annot["top"], annot["x1"], annot["bottom"]))  # type: ignore[index]
+        if bbox:
+            boxes.append(bbox)
+
+    normalized: list[tuple[float, float, float, float]] = []
+    width = float(page.width)
+    height = float(page.height)
+    for raw in boxes:
+        x0, top, x1, bottom = raw
+        normalized.append(
+            (
+                max(0.0, min(x0, x1)),
+                max(0.0, min(top, bottom)),
+                min(width, max(x0, x1)),
+                min(height, max(top, bottom)),
+            )
+        )
+    return [_expand_bbox(bbox, width, height) for bbox in normalized if bbox[0] < bbox[2] and bbox[1] < bbox[3]]
+
+
+def _strikeout_boxes(page: Page) -> list[tuple[float, float, float, float]]:
+    annotations = getattr(page, "annots", None) or []
+    boxes: list[tuple[float, float, float, float]] = []
+    for annot in annotations:
+        subtype = (annot.get("subtype") or annot.get("Subtype") or "").lower()
+        if subtype != "strikeout":
+            continue
+        boxes.extend(_annotation_boxes_from_strikeout(annot, page))
+    return boxes
+
+
+def _boxes_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+
+
+def _page_without_strikeouts(page: Page) -> Page:
+    boxes = _strikeout_boxes(page)
+    if not boxes:
+        return page
+
+    def keep_object(obj: dict[str, Any]) -> bool:
+        if obj.get("object_type") != "char":
+            return True
+        bbox = (
+            float(obj.get("x0", 0.0)),
+            float(obj.get("top", 0.0)),
+            float(obj.get("x1", 0.0)),
+            float(obj.get("bottom", 0.0)),
+        )
+        return not any(_boxes_overlap(bbox, strike) for strike in boxes)
+
+    if hasattr(page, "filter"):
+        try:
+            return page.filter(keep_object, inplace=False)
+        except TypeError:
+            return page.filter(keep_object)
+    return page
+
+
 def extract_body_paragraphs(page: Page) -> list[str]:
     """
     Extract body text paragraphs from a pdfplumber page.
@@ -329,7 +506,8 @@ def extract_body_paragraphs(page: Page) -> list[str]:
     on double newlines as a first-pass approximation of paragraphs.
     You can refine this with layout-aware logic later.
     """
-    raw = page.extract_text(x_tolerance=3, y_tolerance=3)
+    filtered_page = _page_without_strikeouts(page)
+    raw = filtered_page.extract_text(x_tolerance=3, y_tolerance=3)
     if not raw:
         logger.info("No text extracted from page.")
         return []
@@ -397,7 +575,7 @@ def extract_table_texts(page: Page) -> list[dict[str, Any]]:
 def extract_figures_from_pdf(
     pdf_path: str,
     document_id: int,
-    upload_image_fn: Callable[[bytes, str], str],
+    upload_image_fn: Callable[..., str],
 ) -> None:
     """
     Extract figure images and captions from the PDF and insert into rag_figure.
@@ -650,6 +828,13 @@ def ingest_pdf(pdf_path: str = "documents/*.pdf",
 
     log_info = f"chunks_inserted={len(chunks)}"
     logger.info(log_info)
+
+    persist_document_pages(
+        pdf_path=pdf_path,
+        document_id=document_id,
+        upload_image_fn=upload_image_fn,
+    )
+
     log_info = f"Extracting figures for document_id={document_id}"
     logger.info(log_info)
 
