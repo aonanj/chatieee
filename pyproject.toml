@@ -99,6 +99,12 @@ select = [
     "RUF",    # ruff-specific rules
 ]
 ignore = [
+    "TRY400",  # error instead of exception
+    "RUF001",  # en dash instead of minus
+    "PLR2004", # magic numbers
+    "PLW0603", # global update
+    "ERA001",  # commented out code
+    "EM101",   # raw string in exception
     "E501",    # line too long (handled by formatter)
     "PLR0913", # too many arguments
     "PLR0912", # too many branches

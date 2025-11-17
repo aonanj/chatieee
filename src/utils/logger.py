@@ -61,10 +61,10 @@ def setup_logger(name="chatieee", level=logging.INFO, tofile=False, filename="ch
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)
             except PermissionError:
-                logger.exception("File logging disabled: no write permission for %s", final_path)
+                logger.error("File logging disabled: no write permission for %s", final_path)
             except OSError as e:
                 log_exception = f"File logging disabled: OS error for {final_path}: {e}"
-                logger.exception(log_exception)
+                logger.error(log_exception)
         else:
             logger.error("File logging disabled: no writable directory found for %s", target_file)
 

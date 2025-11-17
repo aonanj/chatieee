@@ -27,7 +27,10 @@ CHUNK_UPDATE_BATCH_SIZE = int(os.getenv("CHUNK_UPDATE_BATCH_SIZE", "200"))
 DOCUMENT_HEADERS = [
     "IEEE Std 802-2024 IEEE Standard for Local and Metropolitan Area Networks: Overview and Architecture",
     "IEEE Std 802-2024",
+    "IEEE Std 802.11-2020",
     "IEEE Standard for Local and Metropolitan Area Networks",
+    "IEEE Standard for Information Technology—Local and Metropolitan Area Networks—Specific Requirements",
+    "Part 11: Wireless LAN MAC and PHY Specifications",
     "Overview and Architecture",
     "Authorized licensed use limited to",
     "Phaethon Order",
@@ -35,11 +38,21 @@ DOCUMENT_HEADERS = [
     "Restrictions apply."
 ]
 DOCUMENT_FOOTERS = [
-    "Copyright © 2025 IEEE. All rights reserved.",
+    "Copyright © 2018 IEEE.",
+    "Copyright © 2019 IEEE.",
+    "Copyright © 2020 IEEE.",
+    "Copyright © 2021 IEEE.",
+    "Copyright © 2022 IEEE.",
+    "Copyright © 2023 IEEE.",
+    "Copyright © 2024 IEEE.",
+    "Copyright © 2025 IEEE.",
+    "This is an unapproved IEEE Standards Draft, subject to change.",
+    "All rights reserved.",
     "Authorized licensed use limited to",
-    "from IEEE Xplore.",
+    "UTC from IEEE Xplore.",
     "Restrictions apply.",
-    "Authorized licensed use limited to: Phaethon Order. Downloaded on November 13,2025 at 16:05:53 UTC from IEEE Xplore. Restrictions apply."
+    "Authorized licensed use limited to:",
+    "qqq qqq. Downloaded on September 06,2021 at 13:34:51"
 ]
 DEFAULT_BUCKET_NAME = os.getenv(
     "FIREBASE_STORAGE_BUCKET",

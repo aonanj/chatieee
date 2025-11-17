@@ -17,6 +17,7 @@ This script:
 
 from collections.abc import Callable, Sequence
 import hashlib
+import inspect
 from io import BytesIO
 from pathlib import Path
 import re
@@ -38,10 +39,16 @@ from src.utils.storage import upload_image_fn
 logger = config.LOGGER
 
 MAX_CHARS_PER_BODY_CHUNK = 1800
+LEFT_MARGIN_WIDTH = 100.0  # Points to skip along the left edge (line numbers)
+TOP_MARGIN_HEIGHT = 60.0  # Points to skip from the top edge (headers)
 
 # Figure captions use an em dash after the label (e.g., "Figure 9-22c—").
 FIGURE_LABEL_RE = re.compile(
     r"\b(FIG(?:URE)?\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)\s*(?=[—–])",
+    re.IGNORECASE,
+)
+TABLE_LABEL_RE = re.compile(
+    r"\b(TABLE\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)\s*(?=[—–])",
     re.IGNORECASE,
 )
 
@@ -52,6 +59,41 @@ MAX_FIGURE_HEIGHT = 360.0  # Absolute cap on search height
 FIGURE_WIDTH_PADDING = 12.0  # Minimum width padding (pts)
 FIGURE_WIDTH_PADDING_RATIO = 0.35  # Proportional padding per figure width
 FIGURE_HEIGHT_PADDING = 20.0  # Vertical padding (pts) when rendering crops
+TEXT_FIGURE_MAX_HEIGHT_RATIO = 0.4
+TEXT_FIGURE_MAX_HEIGHT = 260.0
+TABLE_LABEL_SCAN_HEIGHT = 42.0
+CAPTION_SCAN_HEIGHT = 90.0
+
+
+def _remove_margins(
+    page: Page,
+    left_margin: float = LEFT_MARGIN_WIDTH,
+    top_margin: float = TOP_MARGIN_HEIGHT,
+) -> Page:
+    """Crop a page to remove consistent left/top margins."""
+    width = float(getattr(page, "width", 0.0)) or 0.0
+    height = float(getattr(page, "height", 0.0)) or 0.0
+    if width <= 0.0 or height <= 0.0:
+        return page
+
+    effective_left = min(max(0.0, left_margin), max(width - 1.0, 0.0))
+    effective_top = min(max(0.0, top_margin), max(height - 1.0, 0.0))
+    if effective_left <= 0.0 and effective_top <= 0.0:
+        return page
+    if effective_left >= width or effective_top >= height:
+        return page
+
+    bbox = (effective_left, effective_top, width, height)
+    try:
+        return page.crop(bbox)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.error(
+            "Unable to crop page margins (left=%s, top=%s): %s",
+            effective_left,
+            effective_top,
+            exc,
+        )
+        return page
 
 
 def _group_words_into_lines(words: list[dict[str, Any]], line_tol: float = 2.5) -> list[dict[str, Any]]:
@@ -121,12 +163,12 @@ def _extract_caption_candidates(page: Page) -> list[dict[str, Any]]:
             caption_lines.append(lines[j])
             j += 1
 
-        caption_text = " ".join(l["text"] for l in caption_lines).strip()
+        caption_text = " ".join(ln["text"] for ln in caption_lines).strip()
         caption_bbox = (
-            min(l["x0"] for l in caption_lines),
-            min(l["top"] for l in caption_lines),
-            max(l["x1"] for l in caption_lines),
-            max(l["bottom"] for l in caption_lines),
+            min(ln["x0"] for ln in caption_lines),
+            min(ln["top"] for ln in caption_lines),
+            max(ln["x1"] for ln in caption_lines),
+            max(ln["bottom"] for ln in caption_lines),
         )
 
         captions.append(
@@ -240,11 +282,90 @@ def _build_figure_bbox(
     return bbox
 
 
+def _build_textual_figure_bbox(
+    page: Page,
+    caption_bbox: tuple[float, float, float, float],
+    min_top: float,
+) -> tuple[float, float, float, float] | None:
+    """Fallback: infer a bounding box using word positions above the caption."""
+    caption_top = caption_bbox[1]
+    search_bottom = max(min(float(page.height) - 1, caption_top - 2), min_top + 1)
+    max_height = min(float(page.height) * TEXT_FIGURE_MAX_HEIGHT_RATIO, TEXT_FIGURE_MAX_HEIGHT)
+    search_top = max(min_top, search_bottom - max_height)
+    if search_bottom <= search_top:
+        return None
+
+    try:
+        words = page.extract_words(x_tolerance=2, y_tolerance=2)
+    except TypeError:
+        words = page.extract_words()
+
+    region_words: list[tuple[float, float, float, float]] = []
+    for word in words:
+        x0 = float(word.get("x0", 0.0))
+        top = float(word.get("top", 0.0))
+        x1 = float(word.get("x1", 0.0))
+        bottom = float(word.get("bottom", 0.0))
+        if bottom <= search_top or top >= search_bottom:
+            continue
+        if bottom > caption_top - 1:
+            continue
+        if x1 <= LEFT_MARGIN_WIDTH * 0.75:
+            continue
+        region_words.append((x0, top, x1, bottom))
+
+    if len(region_words) < 3:
+        return None
+
+    bbox = (
+        max(0.0, min(word[0] for word in region_words) - 6),
+        max(search_top, min(word[1] for word in region_words) - 4),
+        min(float(page.width), max(word[2] for word in region_words) + 6),
+        min(search_bottom, max(word[3] for word in region_words) + 4),
+    )
+
+    if bbox[2] - bbox[0] < 20:
+        return None
+
+    if bbox[3] - bbox[1] < MIN_FIGURE_HEIGHT:
+        needed = MIN_FIGURE_HEIGHT - (bbox[3] - bbox[1])
+        bbox = (
+            bbox[0],
+            max(search_top, bbox[1] - needed),
+            bbox[2],
+            bbox[3],
+        )
+        if bbox[3] - bbox[1] < MIN_FIGURE_HEIGHT:
+            return None
+
+    return bbox
+
+
+def _has_table_label_above(
+    page: Page,
+    bbox: tuple[float, float, float, float],
+    scan_height: float = TABLE_LABEL_SCAN_HEIGHT,
+) -> bool:
+    """Detect if a table caption (Table XX-YY) sits immediately above the bbox."""
+    x0, top, x1, _ = bbox
+    if top <= 0.0:
+        return False
+    label_box = (
+        max(0.0, x0 - 10.0),
+        max(0.0, top - scan_height),
+        min(float(page.width), x1 + 10.0),
+        top,
+    )
+    text = page.within_bbox(label_box).extract_text(x_tolerance=2, y_tolerance=2) or ""
+    return bool(TABLE_LABEL_RE.search(clean_text(text)))
+
+
 def _render_bbox(page: Page, bbox: tuple[float, float, float, float]) -> bytes:
     """Render a cropped region of the page to PNG bytes."""
     width = max(1.0, bbox[2] - bbox[0])
-    pad = min(
-        max(FIGURE_WIDTH_PADDING, width * FIGURE_WIDTH_PADDING_RATIO),
+    pad = max(
+        FIGURE_WIDTH_PADDING,
+        width * FIGURE_WIDTH_PADDING_RATIO,
         float(page.width) * 0.35,
     )
     v_pad = min(FIGURE_HEIGHT_PADDING, float(page.height) * 0.05)
@@ -266,13 +387,17 @@ def _render_bbox(page: Page, bbox: tuple[float, float, float, float]) -> bytes:
     return buffer.getvalue()
 
 
-def _extract_caption_text_from_bbox(page: Page, bbox: tuple[float, float, float, float]) -> str:
+def _extract_caption_text_from_bbox(
+    page: Page,
+    bbox: tuple[float, float, float, float],
+    max_height: float = CAPTION_SCAN_HEIGHT,
+) -> str:
     """Pull text immediately below a bounding box as a fallback caption."""
     caption_box = (
         bbox[0],
         min(float(page.height), bbox[3]),
         bbox[2],
-        min(float(page.height), bbox[3] + 60),
+        min(float(page.height), bbox[3] + max_height),
     )
     text = page.within_bbox(caption_box).extract_text(x_tolerance=2, y_tolerance=2) or ""
     return clean_text(text)
@@ -327,7 +452,7 @@ def persist_document_pages(
                 image_bytes = _render_full_page(page, resolution=resolution)
             except Exception as exc:
                 error = f"Failed to render page {page_num}: {exc}"
-                logger.exception(error)
+                logger.error(error)
                 raise RuntimeError(error) from exc
 
             suggested_name = f"doc{document_id}_page_{page_num:04d}.png"
@@ -414,13 +539,14 @@ def _quadpoints_to_boxes(quadpoints: Sequence[float] | Sequence[Sequence[float]]
         quad_sets = [flat[i : i + 8] for i in range(0, len(flat), 8)]
 
     for quad in quad_sets:
-        if len(quad) < 8:
-            continue
-        xs = [float(quad[idx]) for idx in range(0, len(quad), 2)]
-        ys = [float(quad[idx]) for idx in range(1, len(quad), 2)]
-        bbox = _normalize_bbox((min(xs), min(ys), max(xs), max(ys)))
-        if bbox:
-            boxes.append(bbox)
+        if isinstance(quad, Sequence or list):
+            if len(quad) < 8:
+                continue
+            xs = [float(quad[idx]) for idx in range(0, len(quad), 2)]
+            ys = [float(quad[idx]) for idx in range(1, len(quad), 2)]
+            bbox = _normalize_bbox((min(xs), min(ys), max(xs), max(ys)))
+            if bbox:
+                boxes.append(bbox)
     return boxes
 
 
@@ -476,6 +602,7 @@ def _boxes_overlap(
 
 def _page_without_strikeouts(page: Page) -> Page:
     boxes = _strikeout_boxes(page)
+    logger.info("Found %d strikeout boxes on page.", len(boxes))
     if not boxes:
         return page
 
@@ -489,12 +616,15 @@ def _page_without_strikeouts(page: Page) -> Page:
             float(obj.get("bottom", 0.0)),
         )
         return not any(_boxes_overlap(bbox, strike) for strike in boxes)
-
     if hasattr(page, "filter"):
+        filter_fn = page.filter
         try:
-            return page.filter(keep_object, inplace=False)
-        except TypeError:
-            return page.filter(keep_object)
+            params = inspect.signature(filter_fn).parameters
+        except (TypeError, ValueError):
+            params = {}
+        if "inplace" in params:
+            return filter_fn(keep_object, inplace=False)  # type: ignore[call-arg]
+        return filter_fn(keep_object)
     return page
 
 
@@ -506,7 +636,8 @@ def extract_body_paragraphs(page: Page) -> list[str]:
     on double newlines as a first-pass approximation of paragraphs.
     You can refine this with layout-aware logic later.
     """
-    filtered_page = _page_without_strikeouts(page)
+    content_page = _remove_margins(page)
+    filtered_page = _page_without_strikeouts(content_page)
     raw = filtered_page.extract_text(x_tolerance=3, y_tolerance=3)
     if not raw:
         logger.info("No text extracted from page.")
@@ -533,7 +664,8 @@ def extract_table_texts(page: Page) -> list[dict[str, Any]]:
       - "metadata": dict (e.g., table_index_on_page)
     """
     table_chunks: list[dict[str, Any]] = []
-    tables = page.extract_tables()
+    content_page = _remove_margins(page)
+    tables = content_page.extract_tables()
     if not tables:
         return table_chunks
 
@@ -602,8 +734,23 @@ def extract_figures_from_pdf(
 
                 bbox = _build_figure_bbox(page, caption["caption_bbox"], graphic_boxes, min_top)
                 min_top = max(min_top, caption["caption_bbox"][3] + 2)
+                used_textual_bbox = False
+                if not bbox:
+                    bbox = _build_textual_figure_bbox(page, caption["caption_bbox"], min_top)
+                    used_textual_bbox = bool(bbox)
                 if not bbox:
                     logger.info("Unable to determine bounding box for %s on page %d", figure_label, page_num)
+                    continue
+
+                if used_textual_bbox:
+                    logger.info("Derived textual bounding box for %s on page %d", figure_label, page_num)
+
+                if _has_table_label_above(page, bbox):
+                    logger.info(
+                        "Skipping %s on page %d because a table caption was detected above the candidate region.",
+                        figure_label,
+                        page_num,
+                    )
                     continue
 
                 try:
@@ -635,7 +782,6 @@ def extract_figures_from_pdf(
                 "No caption-derived figures found on page %d, falling back to raw image objects.",
                 page_num,
             )
-            page_text = page.extract_text() or ""
             for idx, img in enumerate(page.images):
                 bbox = (
                     float(img["x0"]),
@@ -643,8 +789,11 @@ def extract_figures_from_pdf(
                     float(img["x1"]),
                     float(img["bottom"]),
                 )
+                if _has_table_label_above(page, bbox):
+                    continue
+
                 caption_text = _extract_caption_text_from_bbox(page, bbox)
-                match = FIGURE_LABEL_RE.search(caption_text) or FIGURE_LABEL_RE.search(page_text)
+                match = FIGURE_LABEL_RE.search(caption_text)
                 if not match:
                     continue
 
@@ -818,7 +967,7 @@ def ingest_pdf(pdf_path: str = "documents/*.pdf",
         source_uri=source_uri,
         checksum=checksum,
         total_pages=total_pages,
-        metadata={},  
+        metadata={},
     )
 
     chunks = build_chunks_from_pdf(pdf_path)

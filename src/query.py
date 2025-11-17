@@ -122,7 +122,7 @@ class LLMReranker:
                 output = response.output[0].content[0].text  # type: ignore[attr-defined]
             scores = self._parse_ranking_output(output)
             if not scores:
-                logger.warning("LLM reranker returned no parsable scores; falling back to heuristic ranking")
+                logger.error("LLM reranker returned no parsable scores; falling back to heuristic ranking")
                 return self._fallback(candidates)
             for candidate in candidates:
                 if candidate.id in scores:
@@ -135,10 +135,10 @@ class LLMReranker:
                 return remaining + rest
         except RuntimeError as exc:
             error = f"OpenAI client is not available: {exc}"
-            logger.exception(error)
+            logger.error(error)
             raise RuntimeError(error) from exc
         except Exception as exc:  # pragma: no cover - API failure path
-            logger.warning("LLM reranker failed, falling back to heuristic ranking", exc_info=exc)
+            logger.error("LLM reranker failed, falling back to heuristic ranking", exc_info=exc)
         return self._fallback(candidates)
     def _fallback(self, candidates: list[ChunkMatch]) -> list[ChunkMatch]:
         if not candidates:
@@ -177,7 +177,7 @@ class LLMReranker:
         try:
             parsed = json.loads(raw_output)
         except json.JSONDecodeError:
-            logger.warning("LLM reranker produced non-JSON output: %s", raw_output[:200])
+            logger.error("LLM reranker produced non-JSON output: %s", raw_output[:200])
             return {}
 
         ranking_entries: list[Any]
@@ -192,12 +192,12 @@ class LLMReranker:
             elif isinstance(ranking, list):
                 ranking_entries = ranking
             else:
-                logger.warning("LLM reranker output missing 'ranking' array: %s", parsed)
+                logger.error("LLM reranker output missing 'ranking' array: %s", parsed)
                 return {}
         elif isinstance(parsed, list):
             ranking_entries = parsed
         else:
-            logger.warning("LLM reranker output has unexpected type: %s", type(parsed))
+            logger.error("LLM reranker output has unexpected type: %s", type(parsed))
             return {}
 
         scores: dict[int, float] = {}
@@ -238,7 +238,7 @@ class AnswerGenerator:
         try:
             response = self._client.responses.create(model=self.model, input=prompt)
         except Exception as exc:  # pragma: no cover - network failure path
-            logger.exception("Failed to generate answer from OpenAI: %s", exc_info=exc)
+            logger.error("Failed to generate answer from OpenAI: %s", exc_info=exc)
             return "Unable to generate an answer at this time."
         answer = getattr(response, "output_text", None)
         if not answer:

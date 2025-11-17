@@ -80,7 +80,7 @@ async def _reset_pool(bad_pool: AsyncConnectionPool | None) -> None:
     try:
         await bad_pool.close()
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Error closing connection pool after failure: %s", exc)
+        logger.error("Error closing connection pool after failure: %s", exc)
     finally:
         _pool = None
 
@@ -119,13 +119,12 @@ async def get_conn() -> AsyncIterator[psycopg.AsyncConnection]:
         try:
             async with pool.connection() as conn, conn.transaction():
                 yield conn
-            return
         except OperationalError as exc:
             attempt += 1
             last_error = exc
             if not is_recoverable_operational_error(exc):
                 raise
-            logger.warning(
+            logger.error(
                 "Recoverable database connection error (attempt %s/%s): %s",
                 attempt,
                 _MAX_RETRIES,
@@ -136,6 +135,8 @@ async def get_conn() -> AsyncIterator[psycopg.AsyncConnection]:
         except Exception:
             # Propagate non-connection errors immediately
             raise
+        else:
+            return
 
     # Only reached if all attempts failed with a recoverable OperationalError
     assert last_error is not None

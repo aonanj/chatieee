@@ -1,6 +1,12 @@
 # Database Schema
 
-This document outlines the database schema for the project. The database is a **PostgreSQL 17** instance hosted on [**Neon**](https://neon.tech/).
+* This document outlines the database schema for the project. The database is a **PostgreSQL 17** instance hosted on [**Neon**](https://neon.tech/).
+
+* Enabled extensions:
+    - `vector`
+    - `pgcrypto`
+    - `pg_trgm`
+    - `unaccent` 
 
 ## Table of Contents
 
