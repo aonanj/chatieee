@@ -282,7 +282,7 @@ class ChunkUpdater:
             if not tokens:
                 continue
             token_pattern = r"\s+".join(re.escape(token) for token in tokens)
-            patterns.append(re.compile(token_pattern, re.IGNORECASE))
+            patterns.append(re.compile(token_pattern, re.IGNORECASE | re.DOTALL | re.MULTILINE))
         return tuple(patterns)
 
 def embed_and_update_chunks():
