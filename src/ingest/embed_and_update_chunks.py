@@ -213,7 +213,7 @@ class ChunkUpdater:
         return len(filtered)
 
     def _flush_batch(self, conn: psycopg.Connection[Any], batch: list[tuple[str, Jsonb, int]]) -> None:
-        logger.debug("Flushing %s chunk updates", len(batch))
+        logger.info("Flushing %s chunk updates", len(batch))
         with conn.cursor() as cur:
             cur.executemany(
                 """
@@ -278,7 +278,11 @@ class ChunkUpdater:
             trimmed = value.strip()
             if not trimmed:
                 continue
-            patterns.append(re.compile(re.escape(trimmed), re.IGNORECASE))
+            tokens = [token for token in re.split(r"\s+", trimmed) if token]
+            if not tokens:
+                continue
+            token_pattern = r"\s+".join(re.escape(token) for token in tokens)
+            patterns.append(re.compile(token_pattern, re.IGNORECASE))
         return tuple(patterns)
 
 def embed_and_update_chunks():

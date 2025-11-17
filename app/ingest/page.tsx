@@ -104,64 +104,37 @@ export default function IngestPage() {
   return (
     <main className="page-gradient min-h-screen px-6 py-10 text-slate-900">
       <div className="app-wrapper">
-        <section className="nav-card flex flex-col gap-6 rounded-3xl border border-white/50 bg-white/30 px-8 py-6 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
-            <Image
-              src="/images/chatieee-logo-white.png"
-              alt="ChatIEEE logo"
-              width={180}
-              height={42}
-              className="drop-shadow-lg"
-              priority
-            />
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-600">ChatIEEE Suite</p>
-              <p className="text-sm text-slate-700">Upload + Orchestrate ingestion</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href="/" className="btn-outline">
-              ← Back to Query
-            </Link>
-            <a
-              className="btn-modern min-w-[150px]"
-              href="mailto:support@phaethon.llc"
-            >
-              Need help?
-            </a>
-          </div>
-        </section>
-
-        <section className="surface-panel hero-panel space-y-8 rounded-[34px] border border-white/60 px-10 py-10">
-          <header className="flex flex-col gap-2 text-left">
-            <p className="section-tag">Ingestion Overview</p>
-            <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
-              Stage PDFs into the documents/ workspace
-            </h1>
-            <p className="max-w-3xl text-sm text-slate-600 md:text-base">
-              Upload IEEE PDFs, persist them under <code>documents/</code>, chunk the text, and
-              trigger embedding so new material is instantly searchable.
-            </p>
-          </header>
-          <div className="grid gap-6 sm:grid-cols-3">
-            <div className="metric-card">
-              <p className="metric-label">Last Upload</p>
-              <p className="metric-value">{lastUploaded ?? "No uploads yet"}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Status</p>
-              <p className="metric-value">{status ?? "Idle"}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Stored Path</p>
-              <p className="metric-value text-sm">
-                {result?.document_path ?? "Awaiting ingestion"}
+        <div className="glass-surface">
+          <section className="glass-card space-y-8 rounded-[34px] border border-white/60 px-10 py-10">
+            <header className="flex flex-col gap-2 text-left">
+              <p className="section-tag">Document intake</p>
+              <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
+                Add WiFi Standards Documents
+              </h1>
+              <p className="max-w-3xl text-sm text-slate-600 md:text-base">
+                Upload IEEE 802.11 standards documents to add them to the knowledge base. Documents must be in PDF format. Text, tables, and figures are extracted and embedded for semantic search.
               </p>
+            </header>
+            <div className="grid gap-6 sm:grid-cols-3">
+              <div className="metric-card">
+                <p className="metric-label">Last Upload</p>
+                <p className="metric-value">{lastUploaded ?? "No uploads yet"}</p>
+              </div>
+              <div className="metric-card">
+                <p className="metric-label">Status</p>
+                <p className="metric-value">{status ?? "Idle"}</p>
+              </div>
+              <div className="metric-card">
+                <p className="metric-label">Stored Path</p>
+                <p className="metric-value text-sm">
+                  {result?.document_path ?? "N/A"}
+                </p>
+              </div>
             </div>
-          </div>
-        </section>
-
-        <form onSubmit={handleSubmit} className="surface-panel rounded-[34px] border border-white/70 px-10 py-10 space-y-8">
+          </section>
+         </div> 
+        <div className="glass-surface">
+        <form onSubmit={handleSubmit} className="glass-card rounded-[34px] border border-white/70 px-10 py-10 space-y-8">
           <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="section-tag">Upload PDF</p>
@@ -183,7 +156,7 @@ export default function IngestPage() {
 
           <label
             htmlFor="pdf-upload"
-            className="upload-zone block cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-slate-600"
+            className="upload-zone justify-center block max-w-100 cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-slate-600"
           >
             <p className="text-base font-semibold text-slate-800">Drop PDF here or click to browse</p>
             <p className="mt-1 text-xs text-slate-500">Max 50 MB · Stored under documents/</p>
@@ -197,7 +170,7 @@ export default function IngestPage() {
               External ID
               <input
                 type="text"
-                className="input-pill mt-2"
+                className="input-pill"
                 placeholder="ieee-802-2024"
                 value={externalId}
                 disabled={isUploading}
@@ -208,7 +181,7 @@ export default function IngestPage() {
               Title
               <input
                 type="text"
-                className="input-pill mt-2"
+                className="input-pill"
                 placeholder="IEEE 802.11 Standard 2024"
                 value={title}
                 disabled={isUploading}
@@ -218,7 +191,7 @@ export default function IngestPage() {
             <label className="field-label md:col-span-2">
               Description
               <textarea
-                className="textarea-pill mt-2"
+                className="input-pill"
                 placeholder="Optional description for this document."
                 value={description}
                 disabled={isUploading}
@@ -229,7 +202,7 @@ export default function IngestPage() {
               Source URL (optional)
               <input
                 type="url"
-                className="input-pill mt-2"
+                className="input-pill"
                 placeholder="https://standards.ieee.org/..."
                 value={sourceUri}
                 disabled={isUploading}
@@ -238,9 +211,9 @@ export default function IngestPage() {
             </label>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 justify-self-end">
             <button type="submit" className="btn-modern min-w-[180px]" disabled={isUploading || !file}>
-              {isUploading ? "Ingesting…" : "Upload & Ingest"}
+              {isUploading ? "Processing…" : "Upload Document"}
             </button>
             <button
               type="button"
@@ -290,40 +263,12 @@ export default function IngestPage() {
             </div>
           )}
         </form>
-
-        <section className="surface-panel rounded-[34px] border border-white/70 px-10 py-10">
-          <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="section-tag">Pipeline Notes</p>
-              <p className="text-xl font-semibold text-slate-900">What happens after upload?</p>
-            </div>
-          </header>
-          <div className="mt-8 grid gap-6 md:grid-cols-3">
-            {[
-              {
-                title: "Checksum tracking",
-                description: "Documents are deduplicated so re-uploads update the same record.",
-              },
-              {
-                title: "Chunk + Embed",
-                description: "Body + table chunks are created and embeddings generated immediately.",
-              },
-              {
-                title: "Figure capture",
-                description: "Figures are extracted into rag_figure with captions and links.",
-              },
-            ].map((card) => (
-              <div key={card.title} className="figure-card space-y-2 text-sm text-slate-600">
-                <p className="text-base font-semibold text-slate-900">{card.title}</p>
-                <p>{card.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <footer className="rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-slate-600 backdrop-blur-xl">
-          2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
-        </footer>
+        </div>
+        <div className="glass-surface">
+          <footer className="glass-card rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-slate-600 backdrop-blur-xl">
+            2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
+          </footer>
+        </div>
       </div>
     </main>
   );

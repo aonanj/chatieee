@@ -1,5 +1,6 @@
 import "./globals.css";
 import localFont from "next/font/local";
+import NavBar from "./components/NavBar";
 
 const appSans = localFont({
   src: [
@@ -36,6 +37,7 @@ export default function RootLayout({
       <body
         className={`${appSans.className} app-shell min-h-screen text-gray-900`}
       >
+      <NavBar />
         {children}
       </body>
     </html>

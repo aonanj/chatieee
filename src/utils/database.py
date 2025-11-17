@@ -194,7 +194,7 @@ def insert_figures(
         image_uri   = EXCLUDED.image_uri,
         metadata    = EXCLUDED.metadata;
     """
-
+    logger.info("Upserting %d figures for document_id=%d", len(figures), document_id)
     with get_connection() as conn:
         with conn.cursor() as cur:
             for fig in figures:

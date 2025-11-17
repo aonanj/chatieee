@@ -10,7 +10,7 @@ from src import config
 DEFAULT_BUCKET_NAME = config.DEFAULT_BUCKET_NAME
 
 _storage_client: storage.Client | None = None
-
+logger = config.LOGGER
 
 def _get_storage_client() -> storage.Client:
     global _storage_client
@@ -52,12 +52,18 @@ def upload_image_fn(image_bytes: bytes, suggested_name: str) -> str:
 
     bucket_name = DEFAULT_BUCKET_NAME
     client = _get_storage_client()
+    logger.info("Uploading image to GCS bucket: %s", bucket_name)
     bucket = client.bucket(bucket_name)
 
     safe_name = _sanitize_name(suggested_name)
     object_name = f"figures/{uuid.uuid4().hex}_{safe_name}"
 
+
     blob = bucket.blob(object_name)
-    blob.upload_from_string(image_bytes, content_type="image/png")
+    try:
+        blob.upload_from_string(image_bytes, content_type="image/png")
+    except Exception as e:
+        logger.error("Failed to upload image to GCS: %s", e)
+        raise
 
     return f"gs://{bucket_name}/{object_name}"

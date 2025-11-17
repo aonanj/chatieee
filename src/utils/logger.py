@@ -75,5 +75,5 @@ def setup_logger(name="chatieee", level=logging.INFO, tofile=False, filename="ch
     _loggers[name] = logger
     return logger
 
-def get_logger(name="synapseip"):
+def get_logger(name="chatieee"):
     return logging.getLogger(name)

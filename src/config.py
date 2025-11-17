@@ -26,6 +26,13 @@ DEFAULT_VERBOSITY = os.getenv("DEFAULT_VERBOSITY", "high")
 CHUNK_UPDATE_BATCH_SIZE = int(os.getenv("CHUNK_UPDATE_BATCH_SIZE", "200"))
 DOCUMENT_HEADERS = [
     "IEEE Std 802-2024 IEEE Standard for Local and Metropolitan Area Networks: Overview and Architecture",
+    "IEEE Std 802-2024",
+    "IEEE Standard for Local and Metropolitan Area Networks",
+    "Overview and Architecture",
+    "Authorized licensed use limited to",
+    "Phaethon Order",
+    "Downloaded on November 13,2025 at 16:05:53 UTC from IEEE Xplore.",
+    "Restrictions apply."
 ]
 DOCUMENT_FOOTERS = [
     "Copyright © 2025 IEEE. All rights reserved.",
