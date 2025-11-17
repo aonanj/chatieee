@@ -34,12 +34,19 @@ logger = config.LOGGER
 
 MAX_CHARS_PER_BODY_CHUNK = 1800
 
-FIGURE_RE = re.compile(r"\b(FIG(?:URE)?\.?\s*\d+[A-Z]?)", re.IGNORECASE)
+# Figure captions use an em dash after the label (e.g., "Figure 9-22c—").
+FIGURE_LABEL_RE = re.compile(
+    r"\b(FIG(?:URE)?\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)\s*(?=[—–])",
+    re.IGNORECASE,
+)
 
 CAPTION_LINE_GAP = 8.0  # Max vertical gap (points) allowed between caption lines
-MIN_FIGURE_HEIGHT = 80.0
-MAX_FIGURE_HEIGHT_RATIO = 0.45  # Of total page height
+MIN_FIGURE_HEIGHT = 40.0
+MAX_FIGURE_HEIGHT_RATIO = 0.55  # Of total page height
 MAX_FIGURE_HEIGHT = 360.0  # Absolute cap on search height
+FIGURE_WIDTH_PADDING = 12.0  # Minimum width padding (pts)
+FIGURE_WIDTH_PADDING_RATIO = 0.35  # Proportional padding per figure width
+FIGURE_HEIGHT_PADDING = 20.0  # Vertical padding (pts) when rendering crops
 
 
 def _group_words_into_lines(words: list[dict[str, Any]], line_tol: float = 2.5) -> list[dict[str, Any]]:
@@ -93,7 +100,7 @@ def _extract_caption_candidates(page: Page) -> list[dict[str, Any]]:
 
     while idx < len(lines):
         line = lines[idx]
-        match = FIGURE_RE.match(line["text"])
+        match = FIGURE_LABEL_RE.match(line["text"])
         if not match:
             idx += 1
             continue
@@ -104,7 +111,7 @@ def _extract_caption_candidates(page: Page) -> list[dict[str, Any]]:
         while (
             j < len(lines)
             and lines[j]["top"] - caption_lines[-1]["bottom"] <= CAPTION_LINE_GAP
-            and not FIGURE_RE.match(lines[j]["text"])
+            and not FIGURE_LABEL_RE.match(lines[j]["text"])
         ):
             caption_lines.append(lines[j])
             j += 1
@@ -154,13 +161,31 @@ def _gather_vector_boxes(page: Page) -> list[tuple[float, float, float, float]]:
     return boxes
 
 
+def _collect_image_boxes(page: Page) -> list[tuple[float, float, float, float]]:
+    """Collect bounding boxes for raster images embedded in the page."""
+    boxes: list[tuple[float, float, float, float]] = []
+    for image in getattr(page, "images", []):
+        boxes.append(
+            (
+                float(image["x0"]),
+                float(image["top"]),
+                float(image["x1"]),
+                float(image["bottom"]),
+            )
+        )
+    return boxes
+
+
 def _build_figure_bbox(
     page: Page,
     caption_bbox: tuple[float, float, float, float],
-    vector_boxes: list[tuple[float, float, float, float]],
+    graphic_boxes: list[tuple[float, float, float, float]],
     min_top: float,
 ) -> tuple[float, float, float, float] | None:
     """Estimate the figure bounding box located above a caption."""
+    if not graphic_boxes:
+        return None
+
     caption_top = caption_bbox[1]
     search_bottom = max(min(float(page.height) - 1, caption_top - 2), min_top + 1)
     max_height = min(float(page.height) * MAX_FIGURE_HEIGHT_RATIO, MAX_FIGURE_HEIGHT)
@@ -170,7 +195,7 @@ def _build_figure_bbox(
         return None
 
     region_boxes: list[tuple[float, float, float, float]] = []
-    for x0, top, x1, bottom in vector_boxes:
+    for x0, top, x1, bottom in graphic_boxes:
         if bottom <= search_top or top >= search_bottom:
             continue
         region_boxes.append(
@@ -182,20 +207,15 @@ def _build_figure_bbox(
             )
         )
 
-    if region_boxes:
-        bbox = (
-            max(0.0, min(b[0] for b in region_boxes) - 6),
-            max(search_top, min(b[1] for b in region_boxes) - 6),
-            min(float(page.width), max(b[2] for b in region_boxes) + 6),
-            min(search_bottom, max(b[3] for b in region_boxes) + 6),
-        )
-    else:
-        bbox = (
-            6.0,
-            max(search_top, search_bottom - max_height),
-            float(page.width) - 6.0,
-            search_bottom,
-        )
+    if not region_boxes:
+        return None
+
+    bbox = (
+        max(0.0, min(b[0] for b in region_boxes) - 6),
+        max(search_top, min(b[1] for b in region_boxes) - 6),
+        min(float(page.width), max(b[2] for b in region_boxes) + 6),
+        min(search_bottom, max(b[3] for b in region_boxes) + 6),
+    )
 
     height = bbox[3] - bbox[1]
     if height < MIN_FIGURE_HEIGHT:
@@ -217,11 +237,23 @@ def _build_figure_bbox(
 
 def _render_bbox(page: Page, bbox: tuple[float, float, float, float]) -> bytes:
     """Render a cropped region of the page to PNG bytes."""
+    width = max(1.0, bbox[2] - bbox[0])
+    pad = min(
+        max(FIGURE_WIDTH_PADDING, width * FIGURE_WIDTH_PADDING_RATIO),
+        float(page.width) * 0.35,
+    )
+    v_pad = min(FIGURE_HEIGHT_PADDING, float(page.height) * 0.05)
+    expanded = (
+        max(0.0, bbox[0] - pad),
+        max(0.0, bbox[1] - v_pad),
+        min(float(page.width), bbox[2] + pad),
+        min(float(page.height), bbox[3] + v_pad),
+    )
     clipped = (
-        max(0.0, bbox[0]),
-        max(0.0, bbox[1]),
-        min(float(page.width), bbox[2]),
-        min(float(page.height), bbox[3]),
+        max(0.0, expanded[0]),
+        max(0.0, expanded[1]),
+        min(float(page.width), expanded[2]),
+        min(float(page.height), expanded[3]),
     )
     cropped = page.crop(clipped).to_image(resolution=200)
     buffer = BytesIO()
@@ -380,6 +412,8 @@ def extract_figures_from_pdf(
             logger.info("Extracting figures from document_id=%d, page=%d", document_id, page_num)
             captions = _extract_caption_candidates(page)
             vector_boxes = _gather_vector_boxes(page) if captions else []
+            image_boxes = _collect_image_boxes(page) if captions else []
+            graphic_boxes = vector_boxes + image_boxes
             min_top = 0.0
             figures_on_page = 0
 
@@ -388,7 +422,7 @@ def extract_figures_from_pdf(
                 if figure_label in seen_labels:
                     continue
 
-                bbox = _build_figure_bbox(page, caption["caption_bbox"], vector_boxes, min_top)
+                bbox = _build_figure_bbox(page, caption["caption_bbox"], graphic_boxes, min_top)
                 min_top = max(min_top, caption["caption_bbox"][3] + 2)
                 if not bbox:
                     logger.info("Unable to determine bounding box for %s on page %d", figure_label, page_num)
@@ -432,7 +466,7 @@ def extract_figures_from_pdf(
                     float(img["bottom"]),
                 )
                 caption_text = _extract_caption_text_from_bbox(page, bbox)
-                match = FIGURE_RE.search(caption_text) or FIGURE_RE.search(page_text)
+                match = FIGURE_LABEL_RE.search(caption_text) or FIGURE_LABEL_RE.search(page_text)
                 if not match:
                     continue
 

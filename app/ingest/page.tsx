@@ -138,7 +138,7 @@ export default function IngestPage() {
           <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="section-tag">Upload PDF</p>
-              <p className="text-lg font-semibold text-slate-900">Attach document metadata</p>
+              <p className="text-lg font-semibold text-slate-900">Increase WiFi knowledge base</p>
             </div>
             <span className="status-chip">
               {isUploading ? "Ingestion running…" : "Standing by"}

@@ -149,7 +149,7 @@ class ChunkUpdater:
         with psycopg.connect(self.conninfo) as conn:
             conn.execute("SET statement_timeout TO '5min'")
             tracker = StructureTracker()
-            batch: list[tuple[str, Jsonb, int]] = []
+            batch: list[tuple[str, str, Jsonb, int]] = []
             processed = 0
             current_document: int | None = None
             document_rows: list[ChunkRow] = []
@@ -190,7 +190,7 @@ class ChunkUpdater:
         conn: psycopg.Connection[Any],
         tracker: StructureTracker,
         rows: list[ChunkRow],
-        batch: list[tuple[str, Jsonb, int]],
+        batch: list[tuple[str, str, Jsonb, int]],
     ) -> int:
         filtered = self._prepare_rows(rows)
         if not filtered:
@@ -207,18 +207,19 @@ class ChunkUpdater:
             merged = self._merge_metadata(chunk.metadata, updates)
             embedding = self.embedder.embed(chunk.content)
             pgvector = embedding_to_pgvector(embedding.vector)
-            batch.append((pgvector, Jsonb(merged or {}), chunk.id))
+            batch.append((pgvector, chunk.content, Jsonb(merged or {}), chunk.id))
             if len(batch) >= self.batch_size:
                 self._flush_batch(conn, batch)
         return len(filtered)
 
-    def _flush_batch(self, conn: psycopg.Connection[Any], batch: list[tuple[str, Jsonb, int]]) -> None:
+    def _flush_batch(self, conn: psycopg.Connection[Any], batch: list[tuple[str, str, Jsonb, int]]) -> None:
         logger.info("Flushing %s chunk updates", len(batch))
         with conn.cursor() as cur:
             cur.executemany(
                 """
                 UPDATE rag_chunk
                    SET embedding = %s::vector,
+                       content = %s,
                        metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
                  WHERE id = %s
                 """,

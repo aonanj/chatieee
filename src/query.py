@@ -24,7 +24,11 @@ except Exception:  # pragma: no cover
     logger.info("OpenAI library not found, LLM reranking will be disabled")
     OpenAI = None  # type: ignore
 
-FIGURE_RE = re.compile(r"\b(FIG(?:URE)?\.?\s*\d+[A-Z]?)", re.IGNORECASE)
+# Allow appendix-style labels like "FIG. B.5" in addition to "FIG. 3A"
+FIGURE_RE = re.compile(
+    r"\b(FIG(?:URE)?\.?\s*(?:[A-Z]+(?:[\.\-]\s*)?)?\d+(?:\.\d+)*[A-Z]?)",
+    re.IGNORECASE,
+)
 
 @dataclass(slots=True)
 class ChunkMatch:
@@ -57,6 +61,17 @@ class FigureMatch:
     image_uri: str
     metadata: dict[str, Any]
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "document_id": self.document_id,
+            "figure_label": self.figure_label,
+            "page_number": self.page_number,
+            "caption": self.caption,
+            "image_uri": self.image_uri,
+            "metadata": self.metadata,
+        }
+
 class LLMReranker:
     def __init__(self, model: str | None = None) -> None:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -79,8 +94,10 @@ class LLMReranker:
             output = getattr(response, "output_text", None)
             if not output:
                 output = response.output[0].content[0].text  # type: ignore[attr-defined]
-            data = json.loads(output)
-            scores = {entry["id"]: float(entry["score"]) for entry in data.get("ranking", [])}
+            scores = self._parse_ranking_output(output)
+            if not scores:
+                logger.warning("LLM reranker returned no parsable scores; falling back to heuristic ranking")
+                return self._fallback(candidates)
             for candidate in candidates:
                 if candidate.id in scores:
                     candidate.rerank_score = scores[candidate.id]
@@ -127,6 +144,47 @@ class LLMReranker:
             snippet = candidate.content.strip().replace("\n", " ")
             lines.append(f"[{candidate.id}] {snippet}")
         return "\n".join(lines)
+
+    def _parse_ranking_output(self, raw_output: str | None) -> dict[int, float]:
+        if not raw_output:
+            return {}
+        try:
+            parsed = json.loads(raw_output)
+        except json.JSONDecodeError:
+            logger.warning("LLM reranker produced non-JSON output: %s", raw_output[:200])
+            return {}
+
+        ranking_entries: list[Any]
+        if isinstance(parsed, dict):
+            ranking = (
+                parsed.get("ranking")
+                or parsed.get("rankings")
+                or parsed.get("scores")
+            )
+            if ranking is None and {"id", "score"}.issubset(parsed.keys()):
+                ranking_entries = [parsed]
+            elif isinstance(ranking, list):
+                ranking_entries = ranking
+            else:
+                logger.warning("LLM reranker output missing 'ranking' array: %s", parsed)
+                return {}
+        elif isinstance(parsed, list):
+            ranking_entries = parsed
+        else:
+            logger.warning("LLM reranker output has unexpected type: %s", type(parsed))
+            return {}
+
+        scores: dict[int, float] = {}
+        for entry in ranking_entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                candidate_id = int(entry["id"])
+                candidate_score = float(entry["score"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            scores[candidate_id] = candidate_score
+        return scores
 
 
 class AnswerGenerator:
@@ -304,8 +362,8 @@ class HybridRetriever:
             existing = combined.get(result.id)
             if existing:
                 existing.lexical_score = result.lexical_score
-                #if existing.metadata == {} and result.metadata:
-                #    existing.metadata = result.metadata
+                if existing.metadata == {} and result.metadata:
+                    existing.metadata = result.metadata
             else:
                 combined[result.id] = result
         return list(combined.values())
@@ -335,6 +393,7 @@ def get_figures_for_chunks(
             pairs.add((ch.document_id, label))
 
     if not pairs:
+        logger.info("No figure labels found in any chunks")
         return []
 
     values = ",".join(["(%s, %s)"] * len(pairs))
@@ -357,6 +416,7 @@ def get_figures_for_chunks(
     matches: list[FigureMatch] = []
     with psycopg.connect(conninfo) as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(_sql.SQL(sql), params) # type: ignore
+            logger.info("Processing figure retrieval results")
             for row in cur:
                 matches.append(
                     FigureMatch(
@@ -380,13 +440,23 @@ def answer_query(query: str):
     results = retriever.search(query, vector_k=config.VECTOR_K, lexical_k=config.LEXICAL_K, final_k=config.TOP_K)
     logger.info("Retrieved %s candidate chunks for query '%s'", len(results), query)
     figures = get_figures_for_chunks(database_url, results)
-    answerer = AnswerGenerator(model=config.ANSWER_MODEL, verbosity=config.DEFAULT_VERBOSITY)
-    answer = answerer.generate(query, results, max_context_chars=config.MAX_CONTEXT_CHARS)
-    payload = {
-        "answer": answer,
-        "chunks": [r.to_dict() for r in results],
-        "figures": [vars(f) for f in figures],
-    }
+    logger.info("Retrieved %s figures related to the chunks", len(figures))
+    try:
+        answerer = AnswerGenerator(model=config.ANSWER_MODEL, verbosity=config.DEFAULT_VERBOSITY)
+        answer = answerer.generate(query, results, max_context_chars=config.MAX_CONTEXT_CHARS)
+        payload = {
+            "answer": answer,
+            "chunks": [r.to_dict() for r in results],
+            "figures": [f.to_dict() for f in figures],
+        }
+        logger.info("Generated answer for query '%s'", query)
+    except Exception as exc:
+        error = f"Failed to generate answer: {exc}"
+        logger.error(error)
+        payload = {
+            "error": error,
+            "chunks": [r.to_dict() for r in results],
+            "figures": [f.to_dict() for f in figures],
+        }
 
     return json.dumps(payload, indent=2)
-
