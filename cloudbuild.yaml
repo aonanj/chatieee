@@ -26,3 +26,15 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/chatieee-backend'
+
+  # Service account configuration
+serviceAccount: 'projects/chat-ieee/serviceAccounts/firebase-adminsdk-fbsvc@chat-ieee.iam.gserviceaccount.com'
+
+# Build options
+options:
+  logging: 'CLOUD_LOGGING_ONLY'
+  substitutionOption: 'ALLOW_LOOSE'
+  diskSizeGb: '100'
+
+# Timeout for the entire build
+timeout: '1800s'
