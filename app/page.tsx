@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { buildClientApiUrl } from "@/app/lib/api";
 import { resolveStorageUrl } from "@/app/lib/firebase-storage";
@@ -48,6 +48,8 @@ type StorageLinkState = {
 };
 
 const queryEndpoint = buildClientApiUrl("/query");
+const PAGE_PREVIEW_PAGE_SIZE = 4;
+const FIGURE_PREVIEW_PAGE_SIZE = 4;
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -58,6 +60,8 @@ export default function Home() {
   const [lastRun, setLastRun] = useState<Date | null>(null);
   const [pageLinks, setPageLinks] = useState<Record<number, StorageLinkState>>({});
   const [figureLinks, setFigureLinks] = useState<Record<number, StorageLinkState>>({});
+  const [pageSourcePage, setPageSourcePage] = useState(0);
+  const [figureSourcePage, setFigureSourcePage] = useState(0);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -123,6 +127,8 @@ export default function Home() {
     setLastRun(null);
     setPageLinks({});
     setFigureLinks({});
+    setPageSourcePage(0);
+    setFigureSourcePage(0);
   };
 
   useEffect(() => {
@@ -218,30 +224,61 @@ export default function Home() {
       cancelled = true;
     };
   }, [result?.figures]);
+  useEffect(() => {
+    setPageSourcePage(0);
+  }, [result?.pages]);
 
-  const chunkSubset = result?.chunks?.slice(0, 4) ?? [];
-  const highlightedChunkIds = new Set(chunkSubset.map((chunk) => chunk.id));
+  useEffect(() => {
+    setFigureSourcePage(0);
+  }, [result?.figures]);
+
+  const chunkSourceLookup = useMemo(() => {
+    const lookup = new Map<number, number>();
+    (result?.chunks ?? []).forEach((chunk, index) => {
+      lookup.set(chunk.id, index + 1);
+    });
+    return lookup;
+  }, [result?.chunks]);
+
   const rankedPages = result?.pages ?? [];
-  const relevantPages = rankedPages.filter((page) =>
-    page.chunk_ids.some((id) => highlightedChunkIds.has(id)),
+  const totalPageSources = rankedPages.length;
+  const pageCount = Math.max(1, Math.ceil(totalPageSources / PAGE_PREVIEW_PAGE_SIZE));
+  const currentPageIndex = Math.min(pageSourcePage, Math.max(pageCount - 1, 0));
+  const pageSliceStart = currentPageIndex * PAGE_PREVIEW_PAGE_SIZE;
+  const visiblePageSources = rankedPages.slice(
+    pageSliceStart,
+    pageSliceStart + PAGE_PREVIEW_PAGE_SIZE,
   );
-  const topPageSources = (relevantPages.length ? relevantPages : rankedPages).slice(0, 4);
+
+  const referencedFigures = result?.figures ?? [];
+  const totalFigureSources = referencedFigures.length;
+  const figurePageCount = Math.max(1, Math.ceil(totalFigureSources / FIGURE_PREVIEW_PAGE_SIZE));
+  const currentFigureIndex = Math.min(figureSourcePage, Math.max(figurePageCount - 1, 0));
+  const figureSliceStart = currentFigureIndex * FIGURE_PREVIEW_PAGE_SIZE;
+  const visibleFigures = referencedFigures.slice(
+    figureSliceStart,
+    figureSliceStart + FIGURE_PREVIEW_PAGE_SIZE,
+  );
+
   const lastRunLabel = lastRun
     ? lastRun.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "No runs yet";
+  const statusChipMessage = error ?? status ?? "Connected to ingestion pipeline";
+  const statusChipTone = error ? "error" : isLoading ? "processing" : status ? "success" : "neutral";
+  const statusChipClassName = ["status-chip", statusChipTone].filter(Boolean).join(" ");
 
   return (
-    <main className="page-gradient min-h-screen px-6 py-10 text-slate-900">
+    <main className="page-gradient min-h-screen px-6 py-10 text-[#39506B]">
       <div className="app-wrapper">
         <div className="glass-surface">
           <section className="glass-card space-y-2 rounded-[34px] border border-white/60 px-10 py-10">
             <div>
               <header className="flex flex-col gap-2 text-left">
                 <p className="section-tag">IEEE Knowledge Overview</p>
-                <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
+                <h1 className="text-5xl font-semibold text-[#39506B] md:text-[30px]">
                   Semantic Search for WiFi Standards
                 </h1>
-                <p className="max-w-3xl text-sm text-slate-600 md:text-base">
+                <p className="max-w-3xl text-sm text-[#39506B] md:text-base opacity-75">
                   An easier way to find relevant information in IEEE 802.11 standards.
                 </p>
                 <br />
@@ -269,10 +306,10 @@ export default function Home() {
             <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="metric-label">Focus Question</p>
-                <p className="text-lg font-semibold text-slate-900">What do you want to learn?</p>
+                <p className="text-lg font-semibold text-[#39506B]">Input IEEE 802.11 Standards Query</p>
               </div>
-              <span className="status-chip neutral">
-                {error ? "Disconnected" : "Connected to ingestion pipeline"}
+              <span className={statusChipClassName}>
+                {statusChipMessage}
               </span>
             </header>
 
@@ -285,7 +322,7 @@ export default function Home() {
                 onChange={(event) => setQuery(event.target.value)}
               />
               <div className="glass-card flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+                <div className="flex flex-wrap gap-4 text-sm text-[#39506B]">
                   <label className="toggle-pill">
                     <input type="checkbox" checked readOnly />
                     <span>Return supporting sources</span>
@@ -306,17 +343,6 @@ export default function Home() {
               </div>
             </form>
 
-            {error && (
-              <div className="alert-card error">
-                {error}
-              </div>
-            )}
-
-            {status && !error && (
-              <div className="alert-card info">
-                {status}
-              </div>
-            )}
           </section>
         </div>
         <div className="glass-surface">
@@ -324,7 +350,7 @@ export default function Home() {
             <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="section-tag">Results</p>
-                <p className="text-xl font-semibold text-slate-900">Contextual Answer + Sources</p>
+                <p className="text-lg font-semibold text-[#39506B]">Contextual Answer + Sources</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <span className="status-chip">
@@ -339,32 +365,42 @@ export default function Home() {
             {result ? (
               <div className="space-y-8">
                 <div className="panel-sub">
-                  <h2 className="text-lg font-semibold text-slate-900">Answer</h2>
+                  <h2 className="text-lg font-semibold text-[#39506B]">Answer</h2>
                   <p className="mt-3 whitespace-pre-line text-base leading-relaxed text-slate-700">
                     {result.answer}
                   </p>
                 </div>
 
-                {topPageSources.length > 0 && (
+                {visiblePageSources.length > 0 && (
                   <div className="panel-sub space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-semibold text-slate-900">Supporting Sources</h3>
+                      <h3 className="text-base font-semibold text-[#39506B]">Supporting Sources</h3>
                       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                        Top {topPageSources.length} page previews
+                        Showing {visiblePageSources.length} of {totalPageSources} pages (Page{" "}
+                        {currentPageIndex + 1} of {pageCount})
                       </p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      {topPageSources.map((page, index) => {
+                      {visiblePageSources.map((page, index) => {
                         const linkState = pageLinks[page.id];
                         const chunkCount = page.chunk_ids.length;
                         const chunkLabel =
                           chunkCount === 1 ? "Referenced by 1 chunk" : `Referenced by ${chunkCount} chunks`;
                         const readyLink = linkState?.status === "ready" ? linkState.url : null;
+                        const pageSources = page.chunk_ids
+                          .map((chunkId) => chunkSourceLookup.get(chunkId))
+                          .filter((value): value is number => typeof value === "number")
+                          .sort((a, b) => a - b);
+                        const sourcesLabel = pageSources.length
+                          ? `Source(s) ${pageSources.join(", ")}`
+                          : "Source(s) unavailable";
 
                         return (
                           <article key={`page-${page.id}`} className="result-card space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-500">
-                              <span className="font-semibold text-slate-700">Source {index + 1}</span>
+                              <span className="font-semibold text-slate-700">
+                                Page Preview {pageSliceStart + index + 1}
+                              </span>
                               <div className="flex gap-2">
                                 <span className="status-chip mini">Doc #{page.document_id}</span>
                                 <span className="status-chip mini">Page {page.page_number}</span>
@@ -392,8 +428,11 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center justify-between text-xs text-slate-500">
+                            <div className="flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
                               <span>{chunkLabel}</span>
+                              <span className="font-semibold text-slate-700">{sourcesLabel}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-slate-500">
                               {readyLink ? (
                                 <a
                                   href={readyLink}
@@ -411,49 +450,124 @@ export default function Home() {
                         );
                       })}
                     </div>
+                    {pageCount > 1 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                        <button
+                          type="button"
+                          className="btn-outline disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => setPageSourcePage((prev) => Math.max(prev - 1, 0))}
+                          disabled={currentPageIndex === 0}
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {currentPageIndex + 1} of {pageCount}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-modern disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() =>
+                            setPageSourcePage((prev) =>
+                              Math.min(prev + 1, Math.max(pageCount - 1, 0)),
+                            )
+                          }
+                          disabled={currentPageIndex >= pageCount - 1}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {result.figures?.length ? (
+                {totalFigureSources ? (
                   <div className="panel-sub space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-semibold text-slate-900">Figures Referenced</h3>
-                      <p className="text-xs text-slate-500">Linked directly from rag_figure</p>
+                      <h3 className="text-base font-semibold text-[#39506B]">Figures Referenced</h3>
+                      <p className="text-xs text-slate-500">
+                        Showing {visibleFigures.length} of {totalFigureSources} figures (Page{" "}
+                        {currentFigureIndex + 1} of {figurePageCount})
+                      </p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-3">
-                      {result.figures.map((figure) => (
-                        <div key={figure.id} className="figure-card">
-                          <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span className="font-semibold text-slate-700">
-                              {figure.figure_label}
-                            </span>
-                            {figure.page_number && <span>Page {figure.page_number}</span>}
+                      {visibleFigures.map((figure, index) => {
+                        const linkState = figureLinks[figure.id];
+                        const readyLink = linkState?.status === "ready" ? linkState.url : null;
+                        return (
+                          <div key={figure.id} className="figure-card space-y-3">
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span className="font-semibold text-slate-700">
+                                {figure.figure_label}
+                              </span>
+                              {figure.page_number && <span>Page {figure.page_number}</span>}
+                            </div>
+                            {figure.caption && (
+                              <p className="text-sm text-slate-700">{figure.caption}</p>
+                            )}
+                            <div className="relative flex h-48 w-full items-center justify-center overflow-hidden rounded-2xl bg-white/70 p-2 shadow-inner">
+                              {readyLink ? (
+                                <Image
+                                  src={readyLink}
+                                  alt={figure.figure_label}
+                                  fill
+                                  sizes="(min-width: 768px) 33vw, 100vw"
+                                  className="rounded-xl border border-slate-200 bg-white object-contain"
+                                  priority={currentFigureIndex === 0 && index === 0}
+                                />
+                              ) : linkState?.status === "loading" ? (
+                                <span className="text-xs text-slate-400">Rendering preview…</span>
+                              ) : (
+                                <span className="text-xs text-slate-400">Preview unavailable</span>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              {readyLink ? (
+                                <a
+                                  href={readyLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-blue-600 underline"
+                                >
+                                  View figure
+                                </a>
+                              ) : (
+                                <span className="text-slate-400">No link</span>
+                              )}
+                              <span className="text-slate-400">
+                                Figure {figureSliceStart + index + 1}
+                              </span>
+                            </div>
                           </div>
-                          {figure.caption && (
-                            <p className="mt-2 text-sm text-slate-700">{figure.caption}</p>
-                          )}
-                          {figureLinks[figure.id]?.status === "ready" &&
-                          figureLinks[figure.id]?.url ? (
-                            <a
-                              href={figureLinks[figure.id]?.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-3 inline-flex text-xs font-semibold text-blue-600 underline"
-                            >
-                              View Figure
-                            </a>
-                          ) : figureLinks[figure.id]?.status === "loading" ? (
-                            <span className="mt-3 inline-flex text-xs font-semibold text-slate-400">
-                              Resolving link…
-                            </span>
-                          ) : (
-                            <span className="mt-3 inline-flex text-xs font-semibold text-slate-400">
-                              Link unavailable
-                            </span>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
+                    {figurePageCount > 1 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                        <button
+                          type="button"
+                          className="btn-outline disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => setFigureSourcePage((prev) => Math.max(prev - 1, 0))}
+                          disabled={currentFigureIndex === 0}
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {currentFigureIndex + 1} of {figurePageCount}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-modern disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() =>
+                            setFigureSourcePage((prev) =>
+                              Math.min(prev + 1, Math.max(figurePageCount - 1, 0)),
+                            )
+                          }
+                          disabled={currentFigureIndex >= figurePageCount - 1}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -465,7 +579,7 @@ export default function Home() {
           </section>
         </div>
         <div className="glass-surface">
-          <footer className="glass-card rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-sm text-slate-600 backdrop-blur-xl">
+          <footer className="glass-card rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-sm text-[#39506B] backdrop-blur-xl">
             2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
           </footer>
         </div>

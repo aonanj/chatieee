@@ -282,6 +282,24 @@ body.app-shell {
   background: rgba(148, 163, 184, 0.15);
 }
 
+.status-chip.processing {
+  background: rgba(191, 219, 254, 0.9);
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.status-chip.success {
+  background: rgba(187, 247, 208, 0.92);
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.status-chip.error {
+  background: rgba(254, 226, 226, 0.95);
+  color: #991b1b;
+  border-color: rgba(153, 27, 27, 0.35);
+}
+
 .status-chip.mini {
   padding: 3px 10px;
   font-size: 10px;

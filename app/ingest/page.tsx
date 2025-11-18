@@ -24,6 +24,9 @@ export default function IngestPage() {
   const [result, setResult] = useState<IngestResponse | null>(null);
   const [lastUploaded, setLastUploaded] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const statusChipMessage = error ?? status ?? (isUploading ? "Ingestion running…" : "Standing by");
+  const statusChipTone = error ? "error" : status ? "success" : isUploading ? "processing" : "neutral";
+  const statusChipClassName = ["status-chip", statusChipTone].filter(Boolean).join(" ");
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] ?? null;
@@ -100,16 +103,16 @@ export default function IngestPage() {
   };
 
   return (
-    <main className="page-gradient min-h-screen px-6 py-10 text-slate-900">
+    <main className="page-gradient min-h-screen px-6 py-10 text-[#39506B]">
       <div className="app-wrapper">
         <div className="glass-surface">
           <section className="glass-card space-y-8 rounded-[34px] border border-white/60 px-10 py-10">
             <header className="flex flex-col gap-2 text-left">
               <p className="section-tag">Document intake</p>
-              <h1 className="text-3xl font-semibold text-slate-900 md:text-[34px]">
+              <h1 className="text-5xl font-semibold text-[#39506B] md:text-[30px]">
                 Add WiFi Standards Documents
               </h1>
-              <p className="max-w-3xl text-sm text-slate-600 md:text-base">
+              <p className="max-w-3xl text-sm text-[#39506B] md:text-base opacity-75">
                 Upload IEEE 802.11 standards documents to add them to the knowledge base. Documents must be in PDF format. Text, tables, and figures are extracted and embedded for semantic search.
               </p>
             </header>
@@ -136,11 +139,9 @@ export default function IngestPage() {
           <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="section-tag">Upload PDF</p>
-              <p className="text-lg font-semibold text-slate-900">Increase WiFi knowledge base</p>
+              <p className="text-lg font-semibold text-[#39506B]">Increase WiFi knowledge base</p>
             </div>
-            <span className="status-chip">
-              {isUploading ? "Ingestion running…" : "Standing by"}
-            </span>
+            <span className={statusChipClassName}>{statusChipMessage}</span>
           </header>
 
           <input
@@ -154,11 +155,11 @@ export default function IngestPage() {
 
           <label
             htmlFor="pdf-upload"
-            className="upload-zone justify-center block max-w-100 cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-slate-600"
+            className="upload-zone justify-center block max-w-100 cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-[#39506B]"
           >
             <p className="text-base font-semibold text-slate-800">Drop PDF here or click to browse</p>
             <p className="mt-1 text-xs text-slate-500">Max 50 MB · Stored under documents/</p>
-            <p className="mt-3 text-sm text-slate-600">
+            <p className="mt-3 text-sm text-[#39506B]">
               {file ? file.name : "No file selected"}
             </p>
           </label>
@@ -232,38 +233,13 @@ export default function IngestPage() {
                 }
               }}
             >
-              Reset Form
+              Reset
             </button>
           </div>
-
-          {error && (
-            <div className="alert-card error mt-6">
-              {error}
-            </div>
-          )}
-
-          {status && !error && (
-            <div className="alert-card info">
-              {status}
-            </div>
-          )}
-
-          {result && !error && (
-            <div className="panel-sub text-sm text-slate-700">
-              <p className="font-semibold text-slate-900">
-                {result.message ?? "Ingestion finished."}
-              </p>
-              {result.document_path && (
-                <p className="mt-1 text-slate-600">
-                  Stored at: <code>{result.document_path}</code>
-                </p>
-              )}
-            </div>
-          )}
         </form>
         </div>
         <div className="glass-surface">
-          <footer className="glass-card rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-slate-600 backdrop-blur-xl">
+          <footer className="glass-card rounded-3xl border border-white/40 bg-white/30 px-8 py-4 text-center text-xs text-[#39506B] backdrop-blur-xl">
             2025 © Phaethon Order LLC · support@phaethon.llc · Secure IEEE knowledge workflows
           </footer>
         </div>

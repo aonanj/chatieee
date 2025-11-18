@@ -91,8 +91,6 @@ chatieee/
 ├── public/                          # Static assets
 │   ├── fonts/                      # Inter font files
 │   └── images/                     # Logo and icons
-├── instructions/                    # Development documentation
-│   └── copilot-instructions.md     # AI assistant guidelines
 ├── issues/                          # Issue tracking
 │   └── issues.md                   # Known issues and TODOs
 ├── DATABASE_SCHEMA.md               # Complete database schema

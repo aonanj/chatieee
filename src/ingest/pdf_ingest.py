@@ -39,8 +39,9 @@ from src.utils.storage import upload_image_fn
 logger = config.LOGGER
 
 MAX_CHARS_PER_BODY_CHUNK = 1800
-LEFT_MARGIN_WIDTH = 100.0  # Points to skip along the left edge (line numbers)
+LEFT_MARGIN_WIDTH = 80.0  # Points to skip along the left edge (line numbers)
 TOP_MARGIN_HEIGHT = 60.0  # Points to skip from the top edge (headers)
+BOTTOM_MARGIN_HEIGHT = 35.0  # Points to skip from the bottom edge (footers)
 
 # Figure captions use an em dash after the label (e.g., "Figure 9-22c—").
 FIGURE_LABEL_RE = re.compile(
@@ -48,7 +49,7 @@ FIGURE_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 TABLE_LABEL_RE = re.compile(
-    r"\b(TABLE\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)\s*(?=[—–])",
+    r"^\s*(TABLE\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)\s*(?=[—–])",
     re.IGNORECASE,
 )
 
@@ -69,8 +70,9 @@ def _remove_margins(
     page: Page,
     left_margin: float = LEFT_MARGIN_WIDTH,
     top_margin: float = TOP_MARGIN_HEIGHT,
+    bottom_margin: float = BOTTOM_MARGIN_HEIGHT,
 ) -> Page:
-    """Crop a page to remove consistent left/top margins."""
+    """Crop a page to remove consistent left/top/bottom margins."""
     width = float(getattr(page, "width", 0.0)) or 0.0
     height = float(getattr(page, "height", 0.0)) or 0.0
     if width <= 0.0 or height <= 0.0:
@@ -78,19 +80,24 @@ def _remove_margins(
 
     effective_left = min(max(0.0, left_margin), max(width - 1.0, 0.0))
     effective_top = min(max(0.0, top_margin), max(height - 1.0, 0.0))
-    if effective_left <= 0.0 and effective_top <= 0.0:
+    effective_bottom = min(max(0.0, bottom_margin), max(height - 1.0, 0.0))
+    if effective_left <= 0.0 and effective_top <= 0.0 and effective_bottom <= 0.0:
         return page
     if effective_left >= width or effective_top >= height:
         return page
+    crop_bottom = height - effective_bottom
+    if crop_bottom <= effective_top:
+        return page
 
-    bbox = (effective_left, effective_top, width, height)
+    bbox = (effective_left, effective_top, width, crop_bottom)
     try:
         return page.crop(bbox)
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.error(
-            "Unable to crop page margins (left=%s, top=%s): %s",
+            "Unable to crop page margins (left=%s, top=%s, bottom=%s): %s",
             effective_left,
             effective_top,
+            effective_bottom,
             exc,
         )
         return page
@@ -310,8 +317,6 @@ def _build_textual_figure_bbox(
             continue
         if bottom > caption_top - 1:
             continue
-        if x1 <= LEFT_MARGIN_WIDTH * 0.75:
-            continue
         region_words.append((x0, top, x1, bottom))
 
     if len(region_words) < 3:
@@ -430,7 +435,7 @@ def _persist_figure(
     )
 
 def _render_full_page(page: Page, resolution: int = 180) -> bytes:
-    """Render a full PDF page to PNG bytes."""
+    """Render a full (already cropped if desired) PDF page to PNG bytes."""
     snapshot = page.to_image(resolution=resolution)
     buffer = BytesIO()
     snapshot.save(buffer, format="PNG")
@@ -448,8 +453,9 @@ def persist_document_pages(
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
             logger.info("Rendering page image for document_id=%d page=%d", document_id, page_num)
+            marginless_page = _remove_margins(page)
             try:
-                image_bytes = _render_full_page(page, resolution=resolution)
+                image_bytes = _render_full_page(marginless_page, resolution=resolution)
             except Exception as exc:
                 error = f"Failed to render page {page_num}: {exc}"
                 logger.error(error)
@@ -462,9 +468,9 @@ def persist_document_pages(
                     "page_number": page_num,
                     "image_uri": image_uri,
                     "metadata": {
-                        "width": float(page.width),
-                        "height": float(page.height),
-                        "rotation": getattr(page, "rotation", 0),
+                        "width": float(marginless_page.width),
+                        "height": float(marginless_page.height),
+                        "rotation": getattr(marginless_page, "rotation", 0),
                         "resolution": resolution,
                     },
                 }
