@@ -1,0 +1,28 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/chatieee-backend', '.']
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chatieee-backend']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'chatieee-backend'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/chatieee-backend'
+      - '--region'
+      - 'us-west1'
+      - '--platform'
+      - 'managed'
+      - '--service-account'
+      - 'firebase-adminsdk-fbsvc@chat-ieee.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'
+
+images:
+  - 'gcr.io/$PROJECT_ID/chatieee-backend'

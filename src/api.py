@@ -16,7 +16,7 @@ from firebase_admin import credentials
 import psycopg
 from pydantic import BaseModel
 
-from src.config import LOGGER
+from src.config import FIREBASE_ADMIN_CREDS, LOGGER
 from src.ingest.pdf_ingest import ingest_pdf
 from src.utils.database import get_conn, init_pool
 
@@ -27,7 +27,7 @@ from .query import answer_query
 async def lifespan(_: FastAPI):
     load_dotenv()
     LOGGER.info("Starting ChatIEEE API application lifespan.")
-    cred = credentials.Certificate(".secrets/chat-ieee-firebase-adminsdk-fbsvc-c934ac1c68.json")
+    cred = credentials.Certificate(FIREBASE_ADMIN_CREDS)
     app = firebase_admin.initialize_app(cred)
     if app:
         LOGGER.info("Initialized Firebase Admin SDK with app name: %s", app.name)

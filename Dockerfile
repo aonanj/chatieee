@@ -1,34 +1,19 @@
-# syntax=docker/dockerfile:1.6
+FROM python:3.13-slim
 
-FROM python:3.13-slim AS base
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONPATH=/app
-
+# Set working directory
 WORKDIR /app
 
-# Install Python dependencies inside a dedicated virtual environment.
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
-
+# Copy requirements file
 COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install -r requirements.txt
 
-# Copy application source code.
-COPY . .
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Prepare runtime directories and non-root user for Cloud Run.
-RUN groupadd --system appuser \
-    && useradd --system --gid appuser --create-home appuser \
-    && mkdir -p /app/documents /app/.secrets \
-    && chown -R appuser:appuser /app /opt/venv
+# Copy the source code
+COPY src/ src/
 
-USER appuser
+# Expose port 8080
+ENV PORT=8080
 
-EXPOSE 8080
-
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Run the application
+CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8080"]
