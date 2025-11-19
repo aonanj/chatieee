@@ -49,6 +49,9 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
     "https://127.0.0.1:8000",
     "https://localhost:5174",
     "https://127.0.0.1:5174",
+    "https://chatieee-backend-751780377614.us-west1.run.app",
+    "https://chat-ieee.firebaseapp.com",
+    "https://chat-ieee.web.app",
 ]
 
 _FAVICON_PATH = Path(__file__).resolve().parent.parent / "public" / "favicon.ico"
