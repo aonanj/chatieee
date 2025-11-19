@@ -39,7 +39,7 @@ steps:
       - '--update-env-vars'
       - '^#^EMBEDDING_MODEL=text-embedding-3-small#ANSWER_MODEL=gpt-5-mini#DEFAULT_VERBOSITY=high#FIREBASE_ADMIN_CREDS=.secrets/FIREBASE_ADMIN_CREDS#FIREBASE_ADMIN_CREDS=/.secrets/FIREBASE_ADMIN_CREDS'
       - '--set-secrets'
-      - 'OPENAI_API_KEY=OPENAI_API_KEY:latest,DATABASE_URL=DATABASE_URL:lastest,/.secrets/FIREBASE_ADMIN_CREDS=FIREBASE_ADMIN_CREDS:latest'
+      - 'OPENAI_API_KEY=OPENAI_API_KEY:latest,DATABASE_URL=DATABASE_URL:latest,/.secrets/FIREBASE_ADMIN_CREDS=FIREBASE_ADMIN_CREDS:latest'
       - '--allow-unauthenticated'
 
 images:
