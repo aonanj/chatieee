@@ -8,13 +8,6 @@
     ],
   "rewrites": [
       {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "chatieee-backend", 
-          "region": "us-west1"
-        }
-      },
-      {
         "source": "**",
         "function": "server"
       }
