@@ -12,7 +12,11 @@ LOGGER = setup_logger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-FIREBASE_ADMIN_CREDS = os.environ.get("FIREBASE_ADMIN_CREDS")
+FIREBASE_ADMIN_CREDS = None
+_firebase_admin_creds_path = os.environ.get("FIREBASE_ADMIN_CREDS")
+if _firebase_admin_creds_path:
+    with open(_firebase_admin_creds_path) as f:
+        FIREBASE_ADMIN_CREDS = json.load(f)
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 ANSWER_MODEL = os.getenv("ANSWER_MODEL", "gpt-5-mini")
