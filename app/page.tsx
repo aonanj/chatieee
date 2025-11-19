@@ -409,6 +409,7 @@ export default function Home() {
                             <div className="mt-1 flex h-64 w-full items-center justify-center overflow-hidden rounded-2xl bg-white/70 px-2 py-2 shadow-inner">
                               {readyLink ? (
                                 <div className="relative h-full w-full">
+                                  {/* Firebase Hosting cannot run the Next.js image optimizer for signed Storage URLs */}
                                   <Image
                                     src={readyLink}
                                     alt={`Document ${page.document_id} page ${page.page_number}`}
@@ -416,6 +417,7 @@ export default function Home() {
                                     sizes="(min-width: 768px) 50vw, 100vw"
                                     className="rounded-xl border border-slate-200 bg-white object-contain"
                                     priority={index === 0}
+                                    unoptimized
                                   />
                                 </div>
                               ) : linkState?.status === "loading" ? (
@@ -506,14 +508,18 @@ export default function Home() {
                             )}
                             <div className="relative flex h-48 w-full items-center justify-center overflow-hidden rounded-2xl bg-white/70 p-2 shadow-inner">
                               {readyLink ? (
-                                <Image
-                                  src={readyLink}
-                                  alt={figure.figure_label}
-                                  fill
-                                  sizes="(min-width: 768px) 33vw, 100vw"
-                                  className="rounded-xl border border-slate-200 bg-white object-contain"
-                                  priority={currentFigureIndex === 0 && index === 0}
-                                />
+                                <>
+                                  {/* Serve figures without Next.js optimization so Firebase Hosting can stream the signed URL */}
+                                  <Image
+                                    src={readyLink}
+                                    alt={figure.figure_label}
+                                    fill
+                                    sizes="(min-width: 768px) 33vw, 100vw"
+                                    className="rounded-xl border border-slate-200 bg-white object-contain"
+                                    priority={currentFigureIndex === 0 && index === 0}
+                                    unoptimized
+                                  />
+                                </>
                               ) : linkState?.status === "loading" ? (
                                 <span className="text-xs text-slate-400">Rendering preview…</span>
                               ) : (
