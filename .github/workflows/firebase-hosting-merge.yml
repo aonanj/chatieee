@@ -21,7 +21,7 @@ jobs:
       - name: Set Cleanup Policy
         run: npx -y -p firebase-tools firebase functions:artifacts:setpolicy us-west1 --project chat-ieee --force
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: service-account.json
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CHAT_IEEE }}
 
       - name: Remove Service Account Key
         if: always()
