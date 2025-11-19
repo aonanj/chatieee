@@ -14,20 +14,6 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # --- FIX START: Force Artifact Cleanup Policy ---
-      - name: Create Service Account Key
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_CHAT_IEEE }}' > service-account.json
-
-      - name: Set Cleanup Policy
-        run: firebase functions:artifacts:setpolicy us-west1 --project chat-ieee --force
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CHAT_IEEE }}
-
-      - name: Remove Service Account Key
-        if: always()
-        run: rm service-account.json
-      # --- FIX END ---
-
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
