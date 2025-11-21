@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
+import tempfile
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
@@ -55,7 +56,45 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
 ]
 
 _FAVICON_PATH = Path(__file__).resolve().parent.parent / "public" / "favicon.ico"
-_DOCUMENTS_DIR = Path(__file__).resolve().parent.parent / "documents"
+_DEFAULT_DOCUMENTS_DIR = Path(__file__).resolve().parent.parent / "documents"
+_RESOLVED_DOCUMENTS_DIR: Path | None = None
+
+
+def _resolve_documents_dir() -> Path:
+    """
+    Choose a writable directory for uploads.
+
+    Order of preference:
+      1) Env override (DOCUMENTS_DIR or UPLOAD_BASE_DIR)
+      2) Repo's documents folder (for local dev)
+      3) Ephemeral /tmp mount (Cloud Run safe)
+    """
+    global _RESOLVED_DOCUMENTS_DIR
+    if _RESOLVED_DOCUMENTS_DIR is not None:
+        return _RESOLVED_DOCUMENTS_DIR
+
+    env_dir = os.getenv("DOCUMENTS_DIR") or os.getenv("UPLOAD_BASE_DIR")
+    candidates = [Path(env_dir)] if env_dir else []
+    candidates.append(_DEFAULT_DOCUMENTS_DIR)
+    tmp_candidate = Path(os.getenv("TMPDIR", tempfile.gettempdir())) / "documents"
+    candidates.append(tmp_candidate)
+
+    errors: list[str] = []
+    for directory in candidates:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            if not os.access(directory, os.W_OK):
+                LOGGER.error("Directory is not writable: %s", directory)
+                raise PermissionError(f"Directory is not writable: {directory}")
+            _RESOLVED_DOCUMENTS_DIR = directory
+            LOGGER.info("Using upload directory: %s", directory)
+            return directory
+        except Exception as exc:  # pragma: no cover - defensive logging
+            errors.append(f"{directory}: {exc}")
+            LOGGER.error("Upload directory unusable (%s): %s", directory, exc)
+
+    LOGGER.error("No writable upload directory selected. Attempts: %s", "; ".join(errors))
+    raise HTTPException(status_code=500, detail="Server storage is unavailable for uploads.")
 
 class QueryRequest(BaseModel):
     query: str
@@ -93,15 +132,16 @@ async def ingest_pdf_endpoint(
 
     filename = (pdf.filename or "uploaded.pdf").strip()
     if not filename.lower().endswith(".pdf") and pdf.content_type != "application/pdf":
+        LOGGER.error("Uploaded file is not a PDF: filename=%s, content_type=%s", filename, pdf.content_type)
         raise HTTPException(status_code=400, detail="Uploaded file must be a PDF document.")
 
-    _DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    target_dir = _resolve_documents_dir()
     safe_name = Path(filename).name
-    destination = _DOCUMENTS_DIR / safe_name
+    destination = target_dir / safe_name
 
     counter = 1
     while destination.exists():
-        destination = _DOCUMENTS_DIR / f"{Path(safe_name).stem}_{counter}{Path(safe_name).suffix or '.pdf'}"
+        destination = target_dir / f"{Path(safe_name).stem}_{counter}{Path(safe_name).suffix or '.pdf'}"
         counter += 1
 
     try:
@@ -132,11 +172,13 @@ async def ingest_pdf_endpoint(
             source_uri=source_uri,
         )
     except FileNotFoundError as exc:
+        LOGGER.error("PDF file not found during ingestion: %s", exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.error("Unexpected error during PDF ingestion: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to ingest PDF.") from exc
 
-    relative_path = destination.relative_to(_DOCUMENTS_DIR.parent)
+    relative_path = destination.relative_to(target_dir.parent)
     return {
         "status": "completed",
         "document_path": str(relative_path),
