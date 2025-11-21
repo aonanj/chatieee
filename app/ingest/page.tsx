@@ -1,13 +1,15 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 import { buildClientApiUrl } from "@/app/lib/api";
 
 type IngestResponse = {
   status: string;
+  run_id?: string;
   document_path?: string;
   message?: string;
+  error_message?: string;
 };
 
 const ingestEndpoint = buildClientApiUrl("/ingest_pdf");
@@ -32,6 +34,43 @@ export default function IngestPage() {
     const nextFile = event.target.files?.[0] ?? null;
     setFile(nextFile);
     setLastUploaded(null);
+  };
+
+  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [pollInterval]);
+
+  const pollStatus = async (runId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/backend/ingest/${runId}`);
+        if (!res.ok) return; // Skip if network error
+        
+        const data = await res.json();
+        
+        if (data.status === "completed") {
+          setStatus("Ingestion complete! Knowledge base updated.");
+          setIsUploading(false); // Re-enable buttons
+          clearInterval(interval);
+        } else if (data.status === "failed") {
+          setError(`Ingestion failed: ${data.error_message}`);
+          setIsUploading(false);
+          clearInterval(interval);
+        } else {
+          // Still processing
+          setStatus("Ingesting document... (this may take a moment)");
+        }
+      } catch (e) {
+        console.error("Polling error", e);
+      }
+    }, 2000); // Poll every 2 seconds
+    
+    setPollInterval(interval);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -83,14 +122,15 @@ export default function IngestPage() {
       }
 
       let payload: IngestResponse;
-      try {
-        payload = JSON.parse(text) as IngestResponse;
-      } catch {
-        throw new Error("Received an unexpected response from the server.");
-      }
 
+      payload = JSON.parse(text) as IngestResponse;
       setResult(payload);
-      setStatus(payload.message || "Document queued for ingestion.");
+      setStatus(payload.message || "Processing...");
+      if (payload.run_id) {
+        pollStatus(payload.run_id);
+      } else {
+        setIsUploading(false); // No run_id to poll, so stop uploading state
+      }
       setLastUploaded(file.name);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unexpected error while ingesting.";

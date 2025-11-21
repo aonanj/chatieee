@@ -26,8 +26,15 @@ import psycopg
 from pydantic import BaseModel
 
 from src.config import FIREBASE_ADMIN_CREDS, LOGGER
-from src.ingest.pdf_ingest import ingest_pdf
-from src.utils.database import get_conn, init_pool
+from src.ingest.pdf_ingest import compute_checksum, ingest_pdf
+from src.utils.database import (
+    create_ingestion_run,
+    get_conn,
+    get_ingestion_run,
+    init_pool,
+    update_ingestion_status,
+    upsert_document,
+)
 
 from .query import answer_query
 
@@ -118,6 +125,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def process_ingest_background(run_id: str, pdf_path: str, doc_id: int, metadata: dict[str, Any]):
+    """Background task wrapper to handle status updates."""
+    try:
+        ingest_pdf(
+            pdf_path=pdf_path,
+            external_id=metadata["external_id"],
+            title=metadata["title"],
+            description=metadata["description"],
+            source_uri=metadata["source_uri"]
+        )
+        update_ingestion_status(run_id, "completed")
+        LOGGER.info("Ingestion run %s completed successfully", run_id)
+    except Exception as e:
+        LOGGER.error("Ingestion run %s failed: %s", run_id, e, exc_info=True)
+        update_ingestion_status(run_id, "failed", str(e))
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
     if not _FAVICON_PATH.exists():
@@ -177,25 +200,55 @@ async def ingest_pdf_endpoint(
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
 
-    try:
-        background_tasks.add_task(
-            ingest_pdf,
-            pdf_path=str(destination),
-            external_id=external_id,
-            title=title,
-            description=description,
-            source_uri=source_uri,
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.error("Failed to queue background task: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to queue background task.") from exc
+    checksum = await asyncio.to_thread(compute_checksum, str(destination))
 
-    relative_path = destination.relative_to(target_dir.parent)
+    eff_external_id = external_id or destination.name
+
+    doc_id = await asyncio.to_thread(
+        upsert_document,
+        external_id=eff_external_id,
+        title=title or destination.stem,
+        description=description,
+        source_uri=source_uri,
+        checksum=checksum,
+        total_pages=0,
+        metadata={}
+    )
+
+    run_id = await asyncio.to_thread(
+        create_ingestion_run,
+        doc_id
+    )
+
+    background_tasks.add_task(
+        process_ingest_background,
+        run_id=run_id,
+        pdf_path=str(destination),
+        doc_id=doc_id,
+        metadata={
+                "external_id": eff_external_id,
+                "title": title or destination.stem,
+                "description": description,
+                "source_uri": source_uri,
+        }
+    )
+
+    relative_path = destination.relative_to(_resolve_documents_dir().parent)
     return {
         "status": "processing",
+        "run_id": run_id,
         "document_path": str(relative_path),
         "message": f"Document '{destination.name}' is being processed.",
     }
+
+@app.get("/ingest/{run_id}", tags=["Ingestion"])
+async def get_ingest_status(run_id: str, conn: Conn) -> dict[str, Any]:
+    """Check the status of a background ingestion run."""
+    del conn
+    run = await asyncio.to_thread(get_ingestion_run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
 
 @app.post("/query", tags=["Query"])
 async def query_endpoint(payload: QueryRequest, conn: Conn) -> dict[str, Any]:

@@ -41,6 +41,7 @@ CREATE INDEX idx_rag_chunk_document_id
 import asyncio
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 from psycopg import OperationalError
@@ -389,3 +390,55 @@ def is_recoverable_operational_error(exc: BaseException) -> bool:
         if any(token in message for token in _RECOVERABLE_SUBSTRINGS):
             return True
     return False
+
+def create_ingestion_run(document_id: int) -> str:
+    """
+    Create a new ingestion run record and return its ID (UUID).
+    """
+    run_id = str(uuid4())
+    sql = """
+    INSERT INTO rag_ingestion_run (id, document_id, status, started_at)
+    VALUES (%(id)s, %(document_id)s, 'processing',Pk now());
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"id": run_id, "document_id": document_id})
+        conn.commit()
+    return run_id
+
+def update_ingestion_status(run_id: str, status: str, error_message: str | None = None) -> None:
+    """
+    Update the status of an ingestion run.
+    """
+    sql = """
+    UPDATE rag_ingestion_run
+    SET status = %(status)s,
+        error_message = %(error_message)s,
+        finished_at = (CASE WHEN %(status)s IN ('completed', 'failed') THEN now() ELSE finished_at END)
+    WHERE id = %(id)s;
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"id": run_id, "status": status, "error_message": error_message})
+        conn.commit()
+
+def get_ingestion_run(run_id: str) -> dict[str, Any] | None:
+    """
+    Fetch the status of an ingestion run.
+    """
+    sql = """
+    SELECT id, document_id, status, error_message
+    FROM rag_ingestion_run
+    WHERE id = %(id)s;
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, {"id": run_id})
+            row = cur.fetchone()
+    if row:
+        return {
+            "id": row[0],
+            "document_id": row[1],
+            "status": row[2],
+            "error_message": row[3],
+        }
+    return None
