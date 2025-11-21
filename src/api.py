@@ -152,10 +152,12 @@ async def ingest_pdf_endpoint(
                     break
                 buffer.write(chunk)
     except Exception as exc:
+        LOGGER.error("Failed to store uploaded PDF: %s", exc, exc_info=True)
         if destination.exists():
             destination.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="Failed to store uploaded PDF.") from exc
     finally:
+        LOGGER.info("Closing uploaded PDF file: %s", filename)
         await pdf.close()
 
     if destination.stat().st_size == 0:
@@ -192,14 +194,17 @@ async def query_endpoint(payload: QueryRequest, conn: Conn) -> dict[str, Any]:
 
     query = payload.query.strip()
     if not query:
+        LOGGER.error("Empty query received.")
         raise HTTPException(status_code=400, detail="Query text is required.")
 
     try:
         raw_response = await asyncio.to_thread(answer_query, query)
     except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.error("Error processing query: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Query processing failed.") from exc
 
     try:
         return json.loads(raw_response)
     except json.JSONDecodeError as exc:
+        LOGGER.error("Received malformed response from answer generator: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Received malformed response from answer generator.") from exc
