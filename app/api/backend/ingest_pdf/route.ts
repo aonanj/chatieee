@@ -11,14 +11,18 @@ export async function POST(request: Request) {
   }
 
   const forwardForm = new FormData();
-  incomingForm.forEach((value, key) => {
-    if (typeof value === "string") {
-      forwardForm.append(key, value);
-    } else {
-      const file = value as File;
-      forwardForm.append(key, file, file.name);
-    }
-  });
+  try {
+    incomingForm.forEach((value, key) => {
+      if (typeof value === "string") {
+        forwardForm.append(key, value);
+      } else {
+        const file = value as File;
+        forwardForm.append(key, file, file.name);
+      }
+    });
+  } catch (error) {
+    return backendErrorResponse(error);
+  }
 
   try {
     const backendResponse = await fetch(buildBackendUrl("/ingest_pdf"), {
