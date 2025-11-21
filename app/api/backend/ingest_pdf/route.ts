@@ -1,34 +1,28 @@
 import { buildBackendUrl, backendErrorResponse, proxyBackendResponse } from "../utils";
 
 export const runtime = "nodejs";
+// Allow large uploads and ingestion work to finish before the hosting platform times out.
+export const maxDuration = 500;
 
 export async function POST(request: Request) {
-  let incomingForm: FormData;
   try {
-    incomingForm = await request.formData();
-  } catch (error) {
-    return backendErrorResponse(error);
-  }
+    // Extract key headers to preserve the multipart boundary and content length
+    const headers = new Headers();
+    const contentType = request.headers.get("content-type");
+    const contentLength = request.headers.get("content-length");
 
-  const forwardForm = new FormData();
-  try {
-    incomingForm.forEach((value, key) => {
-      if (typeof value === "string") {
-        forwardForm.append(key, value);
-      } else {
-        const file = value as File;
-        forwardForm.append(key, file, file.name);
-      }
-    });
-  } catch (error) {
-    return backendErrorResponse(error);
-  }
+    if (contentType) headers.set("content-type", contentType);
+    if (contentLength) headers.set("content-length", contentLength);
 
-  try {
+    // Stream the request body directly to the backend without buffering
     const backendResponse = await fetch(buildBackendUrl("/ingest_pdf"), {
       method: "POST",
-      body: forwardForm,
+      headers: headers,
+      body: request.body,
+      // @ts-expect-error "duplex" is required for streaming bodies in Node.js environments but is missing from some type definitions
+      duplex: "half", 
     });
+
     return proxyBackendResponse(backendResponse);
   } catch (error) {
     return backendErrorResponse(error);

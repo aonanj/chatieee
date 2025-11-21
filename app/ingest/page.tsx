@@ -79,7 +79,7 @@ export default function IngestPage() {
             detailMessage = `Failed to ingest PDF: ${text}`;
           }
         }
-        throw new Error(`Failed to ingest PDF. Detail Message: ${detailMessage}`);
+        throw new Error(`Error Message: ${detailMessage}`);
       }
 
       let payload: IngestResponse;
@@ -94,7 +94,7 @@ export default function IngestPage() {
       setLastUploaded(file.name);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unexpected error while ingesting.";
-      setError(`Failed to ingest PDF. Message: ${message}`);
+      setError(message);
       setResult(null);
       setStatus(null);
     } finally {
