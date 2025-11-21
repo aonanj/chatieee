@@ -90,7 +90,7 @@ export default function IngestPage() {
       }
 
       setResult(payload);
-      setStatus("PDF ingested successfully. Embeddings are ready.");
+      setStatus(payload.message || "Document queued for ingestion.");
       setLastUploaded(file.name);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unexpected error while ingesting.";

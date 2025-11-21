@@ -9,7 +9,15 @@ import tempfile
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import firebase_admin
@@ -123,6 +131,7 @@ async def healthz() -> dict[str, str]:
 
 @app.post("/ingest_pdf", tags=["Ingestion"])
 async def ingest_pdf_endpoint(
+    background_tasks: BackgroundTasks,
     conn: Conn,
     pdf: UploadFile = File(...),
     external_id: str | None = Form(None),
@@ -169,7 +178,7 @@ async def ingest_pdf_endpoint(
         raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
 
     try:
-        await asyncio.to_thread(
+        background_tasks.add_task(
             ingest_pdf,
             pdf_path=str(destination),
             external_id=external_id,
@@ -177,18 +186,15 @@ async def ingest_pdf_endpoint(
             description=description,
             source_uri=source_uri,
         )
-    except FileNotFoundError as exc:
-        LOGGER.error("PDF file not found during ingestion: %s", exc)
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
-        LOGGER.error("Unexpected error during PDF ingestion: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to ingest PDF.") from exc
+        LOGGER.error("Failed to queue background task: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to queue background task.") from exc
 
     relative_path = destination.relative_to(target_dir.parent)
     return {
-        "status": "completed",
+        "status": "processing",
         "document_path": str(relative_path),
-        "message": f"Document '{destination.name}' ingested successfully.",
+        "message": f"Document '{destination.name}' is being processed.",
     }
 
 @app.post("/query", tags=["Query"])
