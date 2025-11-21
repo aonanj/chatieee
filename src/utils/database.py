@@ -398,7 +398,7 @@ def create_ingestion_run(document_id: int) -> str:
     run_id = str(uuid4())
     sql = """
     INSERT INTO rag_ingestion_run (id, document_id, status, started_at)
-    VALUES (%(id)s, %(document_id)s, 'processing',Pk now());
+    VALUES (%(id)s, %(document_id)s, 'processing', now());
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
