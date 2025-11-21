@@ -1,4 +1,4 @@
-import { buildBackendUrl, backendErrorResponse, proxyBackendResponse } from "@/app/api/backend/utils";
+import { buildBackendUrl, backendErrorResponse, proxyBackendResponse } from "../../utils";
 
 export const runtime = "nodejs";
 
@@ -11,6 +11,7 @@ export async function GET(
     const backendResponse = await fetch(buildBackendUrl(`/ingest/${id}`), {
       method: "GET",
       headers: { "Content-Type": "application/json" },
+      cache: "no-store", 
     });
     return proxyBackendResponse(backendResponse);
   } catch (error) {
