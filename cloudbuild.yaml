@@ -33,7 +33,8 @@ steps:
       - '--max-instances'
       - '20'
       - '--timeout'
-      - '900'
+      - '3600'
+      - '--no-cpu-throttling'
       - '--concurrency'
       - '100'
       - '--update-env-vars'
@@ -55,4 +56,4 @@ options:
   diskSizeGb: '100'
 
 # Timeout for the entire build
-timeout: '1800s'
+timeout: '3600s'
