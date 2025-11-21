@@ -14,8 +14,9 @@ export async function POST(request: Request) {
   incomingForm.forEach((value, key) => {
     if (typeof value === "string") {
       forwardForm.append(key, value);
-    } else if (value instanceof File) {
-      forwardForm.append(key, value, value.name);
+    } else {
+      const file = value as File;
+      forwardForm.append(key, file, file.name);
     }
   });
 

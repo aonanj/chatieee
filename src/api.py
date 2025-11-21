@@ -51,6 +51,7 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
     "https://localhost:5174",
     "https://127.0.0.1:5174",
     "https://chatieee-backend-751780377614.us-west1.run.app",
+    "https://us-west1-chat-ieee.cloudfunctions.net/ssrchatieee",
     "https://chat-ieee.firebaseapp.com",
     "https://chat-ieee.web.app",
 ]
@@ -71,9 +72,11 @@ def _resolve_documents_dir() -> Path:
     """
     global _RESOLVED_DOCUMENTS_DIR
     if _RESOLVED_DOCUMENTS_DIR is not None:
+        LOGGER.info("Using cached upload directory: %s", _RESOLVED_DOCUMENTS_DIR)
         return _RESOLVED_DOCUMENTS_DIR
 
     env_dir = os.getenv("DOCUMENTS_DIR") or os.getenv("UPLOAD_BASE_DIR")
+    LOGGER.info("Attempting to resolve upload directory. Env override: %s", env_dir)
     candidates = [Path(env_dir)] if env_dir else []
     candidates.append(_DEFAULT_DOCUMENTS_DIR)
     tmp_candidate = Path(os.getenv("TMPDIR", tempfile.gettempdir())) / "documents"
@@ -130,6 +133,7 @@ async def ingest_pdf_endpoint(
     """Persist an uploaded PDF and ingest it into the system."""
     del conn  # Ensures dependency is evaluated for connection health checks.
 
+    LOGGER.info("Received PDF upload: filename=%s, content_type=%s", pdf.filename, pdf.content_type)
     filename = (pdf.filename or "uploaded.pdf").strip()
     if not filename.lower().endswith(".pdf") and pdf.content_type != "application/pdf":
         LOGGER.error("Uploaded file is not a PDF: filename=%s, content_type=%s", filename, pdf.content_type)
