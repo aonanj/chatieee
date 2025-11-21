@@ -155,7 +155,6 @@ async def healthz() -> dict[str, str]:
 @app.post("/ingest_pdf", tags=["Ingestion"])
 async def ingest_pdf_endpoint(
     background_tasks: BackgroundTasks,
-    conn: Conn,
     pdf: UploadFile = File(...),
     external_id: str | None = Form(None),
     title: str | None = Form(None),
@@ -163,7 +162,6 @@ async def ingest_pdf_endpoint(
     source_uri: str | None = Form(None)
 ) -> dict[str, str]:
     """Persist an uploaded PDF and ingest it into the system."""
-    del conn  # Ensures dependency is evaluated for connection health checks.
 
     LOGGER.info("Received PDF upload: filename=%s, content_type=%s", pdf.filename, pdf.content_type)
     filename = (pdf.filename or "uploaded.pdf").strip()
