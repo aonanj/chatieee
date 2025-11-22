@@ -26,8 +26,8 @@ import psycopg
 from pydantic import BaseModel
 
 from src.config import FIREBASE_ADMIN_CREDS, LOGGER
-from src.ingest.pdf_ingest import compute_checksum, ingest_pdf
 from src.ingest.embed_and_update_chunks import backfill_missing_chunk_embeddings
+from src.ingest.pdf_ingest import compute_checksum, ingest_pdf
 from src.utils.database import (
     create_ingestion_run,
     get_conn,
@@ -75,6 +75,7 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
 _FAVICON_PATH = Path(__file__).resolve().parent.parent / "public" / "favicon.ico"
 _DEFAULT_DOCUMENTS_DIR = Path(__file__).resolve().parent.parent / "documents"
 _RESOLVED_DOCUMENTS_DIR: Path | None = None
+_PDF_UPLOAD_FILE = File(...)
 
 
 def _resolve_documents_dir() -> Path:
@@ -104,13 +105,14 @@ def _resolve_documents_dir() -> Path:
             directory.mkdir(parents=True, exist_ok=True)
             if not os.access(directory, os.W_OK):
                 LOGGER.error("Directory is not writable: %s", directory)
-                raise PermissionError(f"Directory is not writable: {directory}")
+                raise PermissionError(f"Directory is not writable: {directory}")  # noqa
             _RESOLVED_DOCUMENTS_DIR = directory
-            LOGGER.info("Using upload directory: %s", directory)
-            return directory
         except Exception as exc:  # pragma: no cover - defensive logging
             errors.append(f"{directory}: {exc}")
             LOGGER.error("Upload directory unusable (%s): %s", directory, exc)
+        else:
+            LOGGER.info("Upload directory is usable: %s", directory)
+            return directory
 
     LOGGER.error("No writable upload directory selected. Attempts: %s", "; ".join(errors))
     raise HTTPException(status_code=500, detail="Server storage is unavailable for uploads.")
@@ -160,10 +162,9 @@ async def healthz() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
 
-@app.post("/ingest_pdf", tags=["Ingestion"])
 async def ingest_pdf_endpoint(
     background_tasks: BackgroundTasks,
-    pdf: UploadFile = File(...),
+    pdf: UploadFile = _PDF_UPLOAD_FILE,
     external_id: str | None = Form(None),
     title: str | None = Form(None),
     description: str | None = Form(None),
