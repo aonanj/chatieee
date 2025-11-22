@@ -151,7 +151,7 @@ class ChunkUpdater:
             extra={"limit": limit, "only_missing_embeddings": only_missing_embeddings},
         )
         with psycopg.connect(self.conninfo) as conn:
-            conn.execute("SET statement_timeout TO '5min'")
+            conn.execute("SET statement_timeout TO '10min'")
             tracker = StructureTracker()
             batch: list[tuple[str, str, Jsonb, int]] = []
             processed = 0
