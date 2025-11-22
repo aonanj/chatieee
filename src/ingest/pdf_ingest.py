@@ -359,10 +359,17 @@ def _has_table_label_above(
         max(0.0, x0 - 10.0),
         max(0.0, top - scan_height),
         min(float(page.width), x1 + 10.0),
-        top,
+        max(0.1, top - (scan_height * 0.25)),
     )
     text = page.within_bbox(label_box).extract_text(x_tolerance=2, y_tolerance=2) or ""
-    return bool(TABLE_LABEL_RE.search(clean_text(text)))
+    label_found = TABLE_LABEL_RE.search(clean_text(text))
+    if label_found:
+        logger.info(
+            "Detected table label '%s' above bbox %s",
+            label_found.group(1),
+            bbox,
+        )
+    return bool(label_found)
 
 
 def _render_bbox(page: Page, bbox: tuple[float, float, float, float]) -> bytes:
