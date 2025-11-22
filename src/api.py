@@ -75,7 +75,6 @@ origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if 
 _FAVICON_PATH = Path(__file__).resolve().parent.parent / "public" / "favicon.ico"
 _DEFAULT_DOCUMENTS_DIR = Path(__file__).resolve().parent.parent / "documents"
 _RESOLVED_DOCUMENTS_DIR: Path | None = None
-_PDF_UPLOAD_FILE = File(...)
 
 
 def _resolve_documents_dir() -> Path:
@@ -164,7 +163,7 @@ async def healthz() -> dict[str, str]:
 
 async def ingest_pdf_endpoint(
     background_tasks: BackgroundTasks,
-    pdf: UploadFile = _PDF_UPLOAD_FILE,
+    pdf: UploadFile | None = None,
     external_id: str | None = Form(None),
     title: str | None = Form(None),
     description: str | None = Form(None),
@@ -173,84 +172,87 @@ async def ingest_pdf_endpoint(
 ) -> dict[str, str]:
     """Persist an uploaded PDF and ingest it into the system."""
 
-    LOGGER.info("Received PDF upload: filename=%s, content_type=%s", pdf.filename, pdf.content_type)
-    filename = (pdf.filename or "uploaded.pdf").strip()
-    if not filename.lower().endswith(".pdf") and pdf.content_type != "application/pdf":
-        LOGGER.error("Uploaded file is not a PDF: filename=%s, content_type=%s", filename, pdf.content_type)
-        raise HTTPException(status_code=400, detail="Uploaded file must be a PDF document.")
+    if pdf is None:
+        pdf = File(...)
+    if pdf:
+        filename = (pdf.filename or "uploaded.pdf").strip()
+        if not filename.lower().endswith(".pdf") and pdf.content_type != "application/pdf":
+            LOGGER.error("Uploaded file is not a PDF: filename=%s, content_type=%s", filename, pdf.content_type)
+            raise HTTPException(status_code=400, detail="Uploaded file must be a PDF document.")
 
-    target_dir = _resolve_documents_dir()
-    safe_name = Path(filename).name
-    destination = target_dir / safe_name
+        target_dir = _resolve_documents_dir()
+        safe_name = Path(filename).name
+        destination = target_dir / safe_name
 
-    counter = 1
-    while destination.exists():
-        destination = target_dir / f"{Path(safe_name).stem}_{counter}{Path(safe_name).suffix or '.pdf'}"
-        counter += 1
+        counter = 1
+        while destination.exists():
+            destination = target_dir / f"{Path(safe_name).stem}_{counter}{Path(safe_name).suffix or '.pdf'}"
+            counter += 1
 
-    try:
-        with destination.open("wb") as buffer:
-            while True:
-                chunk = await pdf.read(1024 * 1024)
-                if not chunk:
-                    break
-                buffer.write(chunk)
-    except Exception as exc:
-        LOGGER.error("Failed to store uploaded PDF: %s", exc, exc_info=True)
-        if destination.exists():
+        try:
+            with destination.open("wb") as buffer:
+                while True:
+                    chunk = await pdf.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+        except Exception as exc:
+            LOGGER.error("Failed to store uploaded PDF: %s", exc, exc_info=True)
+            if destination.exists():
+                destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="Failed to store uploaded PDF.") from exc
+        finally:
+            LOGGER.info("Closing uploaded PDF file: %s", filename)
+            await pdf.close()
+
+        if destination.stat().st_size == 0:
             destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail="Failed to store uploaded PDF.") from exc
-    finally:
-        LOGGER.info("Closing uploaded PDF file: %s", filename)
-        await pdf.close()
+            raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
 
-    if destination.stat().st_size == 0:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
+        checksum = await asyncio.to_thread(compute_checksum, str(destination))
 
-    checksum = await asyncio.to_thread(compute_checksum, str(destination))
+        eff_external_id = external_id or destination.name
 
-    eff_external_id = external_id or destination.name
+        doc_id = await asyncio.to_thread(
+            upsert_document,
+            external_id=eff_external_id,
+            title=title or destination.stem,
+            description=description,
+            source_uri=source_uri,
+            checksum=checksum,
+            total_pages=0,
+            metadata={}
+        )
 
-    doc_id = await asyncio.to_thread(
-        upsert_document,
-        external_id=eff_external_id,
-        title=title or destination.stem,
-        description=description,
-        source_uri=source_uri,
-        checksum=checksum,
-        total_pages=0,
-        metadata={}
-    )
+        run_id = await asyncio.to_thread(
+            create_ingestion_run,
+            doc_id
+        )
+        check_strikeouts = bool(draft_document)
 
-    run_id = await asyncio.to_thread(
-        create_ingestion_run,
-        doc_id
-    )
-    check_strikeouts = bool(draft_document)
+        background_tasks.add_task(
+            process_ingest_background,
+            run_id=run_id,
+            pdf_path=str(destination),
+            doc_id=doc_id,
+            metadata={
+                    "external_id": eff_external_id,
+                    "title": title or destination.stem,
+                    "description": description,
+                    "source_uri": source_uri,
+                    "check_strikeouts": check_strikeouts,
+            },
+            check_strikeouts=check_strikeouts,
+        )
 
-    background_tasks.add_task(
-        process_ingest_background,
-        run_id=run_id,
-        pdf_path=str(destination),
-        doc_id=doc_id,
-        metadata={
-                "external_id": eff_external_id,
-                "title": title or destination.stem,
-                "description": description,
-                "source_uri": source_uri,
-                "check_strikeouts": check_strikeouts,
-        },
-        check_strikeouts=check_strikeouts,
-    )
-
-    relative_path = destination.relative_to(_resolve_documents_dir().parent)
-    return {
-        "status": "processing",
-        "run_id": run_id,
-        "document_path": str(relative_path),
-        "message": f"Document '{destination.name}' is being processed.",
-    }
+        relative_path = destination.relative_to(_resolve_documents_dir().parent)
+        return {
+            "status": "processing",
+            "run_id": run_id,
+            "document_path": str(relative_path),
+            "message": f"Document '{destination.name}' is being processed.",
+        }
+    raise HTTPException(status_code=400, detail="No PDF file uploaded.")
 
 @app.get("/ingest/{run_id}", tags=["Ingestion"])
 async def get_ingest_status(run_id: str, conn: Conn) -> dict[str, Any]:
