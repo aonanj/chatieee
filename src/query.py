@@ -405,10 +405,11 @@ def extract_figure_labels(text: str) -> list[str]:
     return sorted(labels)
 
 def normalise_figure_label(raw: str) -> str:
-    cleaned = " ".join(raw.replace("FIGURE", "FIG.").replace("Fig", "FIG.").split())
-    if not cleaned.upper().startswith("FIG."):
-        cleaned = "FIG. " + cleaned.split()[-1]
-    return cleaned.upper()
+    cleaned = re.sub(r"(?i)^fig(?:ure)?\.?\s*", "", raw or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return "FIGURE"
+    return f"FIGURE {cleaned.upper()}"
 
 def get_pages_for_chunks(
     conninfo: str,

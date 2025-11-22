@@ -836,11 +836,12 @@ def extract_figures_from_pdf(
                 seen_labels.add(figure_label)
 
 def normalise_figure_label(raw: str) -> str:
-    """Normalise 'Fig 3', 'FIGURE 3A' -> 'FIG. 3', 'FIG. 3A'."""
-    cleaned = " ".join(raw.replace("FIGURE", "FIG.").replace("Fig", "FIG.").split())
-    if not cleaned.upper().startswith("FIG."):
-        cleaned = "FIG. " + cleaned.split()[-1]
-    return cleaned.upper()
+    """Normalise figure labels to 'FIGURE <label>' without stray punctuation."""
+    cleaned = re.sub(r"(?i)^fig(?:ure)?\.?\s*", "", raw or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return "FIGURE"
+    return f"FIGURE {cleaned.upper()}"
 
 def build_chunks_from_pdf(path: str, check_strikeouts: bool = True) -> list[dict[str, Any]]:
     """

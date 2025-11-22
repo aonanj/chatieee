@@ -250,24 +250,22 @@ export default function IngestPage() {
                 onChange={(event) => setSourceUri(event.target.value)}
               />
             </label>
-            <div className="flex items-start gap-3 rounded-2xl bg-white/70 px-4 py-3 shadow-sm ring-1 ring-slate-200">
-              <input
-                id="draft-document"
-                type="checkbox"
-                className="mt-1 h-5 w-5 rounded border-slate-300 text-[#39506B] focus:ring-2 focus:ring-[#39506B]"
-                checked={draftDocument}
-                disabled={isUploading}
-                onChange={(event) => setDraftDocument(event.target.checked)}
-              />
-              <div className="space-y-1">
-                <label htmlFor="draft-document" className="block text-sm font-semibold text-[#39506B]">
-                  Draft Document
-                </label>
-                <p className="text-xs text-[#39506B] opacity-70">
+            <label className="field-label md:col-span-2">
+              Draft Document
+              <div className="input-pill flex w-full items-center gap-3 text-[#39506B]">
+                <input
+                  id="draft-document"
+                  type="checkbox"
+                  className="h-5 w-5 rounded border-slate-300 text-[#39506B] focus:ring-2 focus:ring-[#39506B]"
+                  checked={draftDocument}
+                  disabled={isUploading}
+                  onChange={(event) => setDraftDocument(event.target.checked)}
+                />
+                <span className="text-xs opacity-70">
                   Check to process strikeout text; leave unchecked to skip strikeout detection.
-                </p>
+                </span>
               </div>
-            </div>
+            </label>
           </div>
 
           <div className="flex flex-wrap gap-3 justify-self-end">
