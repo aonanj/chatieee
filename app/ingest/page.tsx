@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 import { buildClientApiUrl } from "@/app/lib/api";
 
@@ -12,7 +12,15 @@ type IngestResponse = {
   error_message?: string;
 };
 
+type IngestStatusResponse = {
+  status: string;
+  error_message?: string;
+  started_at?: string;
+  finished_at?: string;
+};
+
 const ingestEndpoint = buildClientApiUrl("/ingest_pdf");
+const ESTIMATED_INGEST_MS = 12 * 60 * 1000; // Rough 12-minute ingest target
 
 export default function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -26,52 +34,122 @@ export default function IngestPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResponse | null>(null);
   const [lastUploaded, setLastUploaded] = useState<string | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const ingestionStartedAtRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const statusChipMessage = error ?? status ?? (isUploading ? "Ingestion running…" : "Standing by");
-  const statusChipTone = error ? "error" : status ? "success" : isUploading ? "processing" : "neutral";
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const uploadDisabled = isUploading;
+  const statusChipMessage =
+    error ??
+    status ??
+    (isUploading ? (progress !== null ? `Ingestion running (~${progress}% est.)` : "Ingestion running…") : "Standing by");
+  const statusChipTone = error ? "error" : isUploading ? "processing" : status ? "success" : "neutral";
   const statusChipClassName = ["status-chip", statusChipTone].filter(Boolean).join(" ");
+  const clampedProgress = progress === null ? null : Math.min(Math.max(progress, 0), 100);
+  const uploadZoneClassName = [
+    "upload-zone justify-center block max-w-100 rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-[#39506B]",
+    uploadDisabled ? "pointer-events-none opacity-60" : "cursor-pointer hover:border-[#39506B]",
+    isDragActive && !uploadDisabled ? "border-[#39506B] bg-white shadow-lg" : "",
+  ].join(" ");
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextFile = event.target.files?.[0] ?? null;
     setFile(nextFile);
     setLastUploaded(null);
+    setIsDragActive(false);
   };
 
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(false);
+    if (uploadDisabled) return;
+
+    const droppedFile = event.dataTransfer?.files?.[0];
+    if (!droppedFile) return;
+
+    const isPdf = droppedFile.type === "application/pdf" || droppedFile.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setError("Only PDF files are supported.");
+      return;
+    }
+
+    setError(null);
+    setFile(droppedFile);
+    setLastUploaded(null);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    if (!isDragActive) setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setIsDragActive(false);
+  };
 
   // Clean up interval on unmount
   useEffect(() => {
     return () => {
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
-  }, [pollInterval]);
+  }, []);
 
-  const pollStatus = async (runId: string) => {
-    const interval = setInterval(async () => {
+  const clearExistingPoll = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  const computeApproxProgress = (startedAt?: string | null, finishedAt?: string | null) => {
+    if (finishedAt) return 100;
+    const effectiveStart = startedAt ? new Date(startedAt).getTime() : ingestionStartedAtRef.current;
+    if (!effectiveStart) return null;
+    const elapsedMs = Math.max(0, Date.now() - effectiveStart);
+    const estimated = Math.round((elapsedMs / ESTIMATED_INGEST_MS) * 100);
+    return Math.max(3, Math.min(estimated, 97));
+  };
+
+  const pollStatus = (runId: string) => {
+    clearExistingPoll();
+
+    pollIntervalRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/backend/ingest/${runId}`);
         if (!res.ok) return; // Skip if network error
-        
-        const data = await res.json();
-        
+
+        const data: IngestStatusResponse = await res.json();
+
+        if (data.started_at) {
+          ingestionStartedAtRef.current = new Date(data.started_at).getTime();
+        }
+
         if (data.status === "completed") {
-          setStatus("Ingestion complete! Knowledge base updated.");
+          setProgress(100);
+          setStatus("Document intake complete. Content now searchable.");
           setIsUploading(false); // Re-enable buttons
-          clearInterval(interval);
+          ingestionStartedAtRef.current = null;
+          clearExistingPoll();
         } else if (data.status === "failed") {
-          setError(`Ingestion failed: ${data.error_message}`);
+          setError(`Ingestion failed: ${data.error_message ?? "Unknown error."}`);
+          setStatus(data.error_message ? `Ingestion failed: ${data.error_message}` : "Ingestion failed.");
+          setProgress(null);
           setIsUploading(false);
-          clearInterval(interval);
+          ingestionStartedAtRef.current = null;
+          clearExistingPoll();
         } else {
           // Still processing
-          setStatus("Ingesting document... (this may take a moment)");
+          const approx = computeApproxProgress(data.started_at, data.finished_at);
+          setProgress(approx);
+          setStatus(approx !== null ? `Processing document… ~${approx}% complete (est.)` : "Processing document... (this may take a moment)");
         }
       } catch (e) {
         console.error("Polling error", e);
       }
-    }, 2000); // Poll every 2 seconds
-    
-    setPollInterval(interval);
+    }, 10000); // Poll every 10 seconds
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -81,6 +159,9 @@ export default function IngestPage() {
       return;
     }
 
+    clearExistingPoll();
+    ingestionStartedAtRef.current = Date.now();
+    setProgress(0);
     setIsUploading(true);
     setError(null);
     setStatus("Uploading PDF and starting ingestion…");
@@ -126,11 +207,18 @@ export default function IngestPage() {
       let payload: IngestResponse;
 
       payload = JSON.parse(text) as IngestResponse;
+      const initialProgress = computeApproxProgress();
+      const initialStatus =
+        payload.run_id && initialProgress !== null
+          ? `Processing document… ~${initialProgress}% complete (est.)`
+          : payload.message || "Processing...";
       setResult(payload);
-      setStatus(payload.message || "Processing...");
+      setProgress(payload.run_id ? initialProgress : null);
+      setStatus(initialStatus);
       if (payload.run_id) {
         pollStatus(payload.run_id);
       } else {
+        ingestionStartedAtRef.current = null;
         setIsUploading(false); // No run_id to poll, so stop uploading state
       }
       setLastUploaded(file.name);
@@ -139,7 +227,9 @@ export default function IngestPage() {
       setError(message);
       setResult(null);
       setStatus(null);
-    } finally {
+      setProgress(null);
+      ingestionStartedAtRef.current = null;
+      clearExistingPoll();
       setIsUploading(false);
     }
   };
@@ -166,6 +256,19 @@ export default function IngestPage() {
               <div className="metric-card">
                 <p className="metric-label">Status</p>
                 <p className="metric-value">{status ?? "Idle"}</p>
+                {clampedProgress !== null && (
+                  <>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/50">
+                      <div
+                        className="h-full rounded-full bg-[#39506B] transition-all duration-500"
+                        style={{ width: `${clampedProgress}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-[#39506B] opacity-70">
+                      ~{clampedProgress}% complete (estimated)
+                    </p>
+                  </>
+                )}
               </div>
               <div className="metric-card">
                 <p className="metric-label">Stored Path</p>
@@ -192,12 +295,17 @@ export default function IngestPage() {
             accept="application/pdf,.pdf"
             onChange={handleFileChange}
             className="hidden"
+            disabled={uploadDisabled}
             id="pdf-upload"
           />
 
           <label
             htmlFor="pdf-upload"
-            className="upload-zone justify-center block max-w-100 cursor-pointer rounded-3xl border border-dashed border-slate-300 bg-white/80 px-8 py-8 text-center text-sm text-[#39506B]"
+            className={uploadZoneClassName}
+            aria-disabled={uploadDisabled}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
           >
             <p className="text-base font-semibold text-slate-800">Drop PDF here or click to browse</p>
             <p className="mt-1 text-xs text-slate-500">Max 50 MB · Stored under documents/</p>
@@ -266,7 +374,7 @@ export default function IngestPage() {
                 </span>
               </div>
             </label>
-          </div>
+              </div>
 
           <div className="flex flex-wrap gap-3 justify-self-end">
             <button type="submit" className="btn-modern min-w-[180px]" disabled={isUploading || !file}>
@@ -286,6 +394,9 @@ export default function IngestPage() {
                 setResult(null);
                 setStatus(null);
                 setError(null);
+                setProgress(null);
+                ingestionStartedAtRef.current = null;
+                clearExistingPoll();
                 setLastUploaded(null);
                 if (fileInputRef.current) {
                   fileInputRef.current.value = "";

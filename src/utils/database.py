@@ -427,7 +427,7 @@ def get_ingestion_run(run_id: str) -> dict[str, Any] | None:
     Fetch the status of an ingestion run.
     """
     sql = """
-    SELECT id, document_id, status, error_message
+    SELECT id, document_id, status, error_message, started_at, finished_at
     FROM rag_ingestion_run
     WHERE id = %(id)s;
     """
@@ -440,5 +440,7 @@ def get_ingestion_run(run_id: str) -> dict[str, Any] | None:
             "document_id": row[1],
             "status": row[2],
             "error_message": row[3],
+            "started_at": row[4],
+            "finished_at": row[5],
         }
     return None
