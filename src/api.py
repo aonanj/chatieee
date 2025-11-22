@@ -160,6 +160,7 @@ async def healthz() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
 
+@app.post("/ingest_pdf", tags=["Ingestion"])
 async def ingest_pdf_endpoint(
     background_tasks: BackgroundTasks,
     pdf: UploadFile | None = None,
