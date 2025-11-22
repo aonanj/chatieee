@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from src.config import FIREBASE_ADMIN_CREDS, LOGGER
 from src.ingest.pdf_ingest import compute_checksum, ingest_pdf
+from src.ingest.embed_and_update_chunks import backfill_missing_chunk_embeddings
 from src.utils.database import (
     create_ingestion_run,
     get_conn,
@@ -125,7 +126,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def process_ingest_background(run_id: str, pdf_path: str, doc_id: int, metadata: dict[str, Any]):
+def process_ingest_background(
+    run_id: str,
+    pdf_path: str,
+    doc_id: int,
+    metadata: dict[str, Any],
+    check_strikeouts: bool,
+):
     """Background task wrapper to handle status updates."""
     try:
         ingest_pdf(
@@ -133,7 +140,8 @@ def process_ingest_background(run_id: str, pdf_path: str, doc_id: int, metadata:
             external_id=metadata["external_id"],
             title=metadata["title"],
             description=metadata["description"],
-            source_uri=metadata["source_uri"]
+            source_uri=metadata["source_uri"],
+            check_strikeouts=check_strikeouts,
         )
         update_ingestion_status(run_id, "completed")
         LOGGER.info("Ingestion run %s completed successfully", run_id)
@@ -159,7 +167,8 @@ async def ingest_pdf_endpoint(
     external_id: str | None = Form(None),
     title: str | None = Form(None),
     description: str | None = Form(None),
-    source_uri: str | None = Form(None)
+    source_uri: str | None = Form(None),
+    draft_document: bool = Form(False),
 ) -> dict[str, str]:
     """Persist an uploaded PDF and ingest it into the system."""
 
@@ -217,6 +226,7 @@ async def ingest_pdf_endpoint(
         create_ingestion_run,
         doc_id
     )
+    check_strikeouts = bool(draft_document)
 
     background_tasks.add_task(
         process_ingest_background,
@@ -228,7 +238,9 @@ async def ingest_pdf_endpoint(
                 "title": title or destination.stem,
                 "description": description,
                 "source_uri": source_uri,
-        }
+                "check_strikeouts": check_strikeouts,
+        },
+        check_strikeouts=check_strikeouts,
     )
 
     relative_path = destination.relative_to(_resolve_documents_dir().parent)
@@ -247,6 +259,17 @@ async def get_ingest_status(run_id: str, conn: Conn) -> dict[str, Any]:
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+@app.post("/chunks/backfill_missing_embeddings", tags=["Maintenance"])
+async def backfill_missing_embeddings(conn: Conn, limit: int | None = None) -> dict[str, Any]:
+    """Fill in missing embeddings while stripping headers/footers and merging metadata."""
+    del conn
+    try:
+        updated = await asyncio.to_thread(backfill_missing_chunk_embeddings, limit)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.error("Failed to backfill missing embeddings: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to backfill missing embeddings.") from exc
+    return {"status": "ok", "updated_chunks": updated}
 
 @app.post("/query", tags=["Query"])
 async def query_endpoint(payload: QueryRequest, conn: Conn) -> dict[str, Any]:

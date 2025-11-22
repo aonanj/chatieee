@@ -634,7 +634,7 @@ def _page_without_strikeouts(page: Page) -> Page:
     return page
 
 
-def extract_body_paragraphs(page: Page) -> list[str]:
+def extract_body_paragraphs(page: Page, check_strikeouts: bool = True) -> list[str]:
     """
     Extract body text paragraphs from a pdfplumber page.
 
@@ -643,8 +643,8 @@ def extract_body_paragraphs(page: Page) -> list[str]:
     You can refine this with layout-aware logic later.
     """
     content_page = _remove_margins(page)
-    filtered_page = _page_without_strikeouts(content_page)
-    raw = filtered_page.extract_text(x_tolerance=3, y_tolerance=3)
+    working_page = _page_without_strikeouts(content_page) if check_strikeouts else content_page
+    raw = working_page.extract_text(x_tolerance=3, y_tolerance=3)
     if not raw:
         logger.info("No text extracted from page.")
         return []
@@ -835,7 +835,7 @@ def normalise_figure_label(raw: str) -> str:
         cleaned = "FIG. " + cleaned.split()[-1]
     return cleaned.upper()
 
-def build_chunks_from_pdf(path: str) -> list[dict[str, Any]]:
+def build_chunks_from_pdf(path: str, check_strikeouts: bool = True) -> list[dict[str, Any]]:
     """
     Parse the PDF and build chunk dicts ready for DB insertion.
 
@@ -863,7 +863,7 @@ def build_chunks_from_pdf(path: str) -> list[dict[str, Any]]:
         chunk_index = 0
 
         for page_num, page in enumerate(pdf.pages, start=1):
-            paragraphs = extract_body_paragraphs(page)
+            paragraphs = extract_body_paragraphs(page, check_strikeouts=check_strikeouts)
             if not paragraphs:
                 continue
 
@@ -949,7 +949,8 @@ def ingest_pdf(pdf_path: str = "documents/*.pdf",
                external_id: str | None = None,
                title: str | None = None,
                description: str | None = None,
-               source_uri: str | None = None) -> None:
+               source_uri: str | None = None,
+               check_strikeouts: bool = True) -> None:
     """Ingest a PDF document, chunk it, store in DB, and extract figures."""
 
     if not Path(pdf_path).is_file():
@@ -976,7 +977,7 @@ def ingest_pdf(pdf_path: str = "documents/*.pdf",
         metadata={},
     )
 
-    chunks = build_chunks_from_pdf(pdf_path)
+    chunks = build_chunks_from_pdf(pdf_path, check_strikeouts=check_strikeouts)
 
     # Upsert chunks (replace all existing chunks for this document)
     replace_chunks(document_id=document_id, chunks=chunks)

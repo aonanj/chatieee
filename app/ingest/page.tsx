@@ -20,6 +20,7 @@ export default function IngestPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [sourceUri, setSourceUri] = useState("");
+  const [draftDocument, setDraftDocument] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +101,7 @@ export default function IngestPage() {
       if (sourceUri.trim()) {
         formData.append("source_uri", sourceUri.trim());
       }
+      formData.append("draft_document", draftDocument ? "true" : "false");
 
       const response = await fetch(ingestEndpoint, {
         method: "POST",
@@ -248,6 +250,24 @@ export default function IngestPage() {
                 onChange={(event) => setSourceUri(event.target.value)}
               />
             </label>
+            <div className="flex items-start gap-3 rounded-2xl bg-white/70 px-4 py-3 shadow-sm ring-1 ring-slate-200">
+              <input
+                id="draft-document"
+                type="checkbox"
+                className="mt-1 h-5 w-5 rounded border-slate-300 text-[#39506B] focus:ring-2 focus:ring-[#39506B]"
+                checked={draftDocument}
+                disabled={isUploading}
+                onChange={(event) => setDraftDocument(event.target.checked)}
+              />
+              <div className="space-y-1">
+                <label htmlFor="draft-document" className="block text-sm font-semibold text-[#39506B]">
+                  Draft Document
+                </label>
+                <p className="text-xs text-[#39506B] opacity-70">
+                  Check to process strikeout text; leave unchecked to skip strikeout detection.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3 justify-self-end">
@@ -264,6 +284,7 @@ export default function IngestPage() {
                 setTitle("");
                 setDescription("");
                 setSourceUri("");
+                setDraftDocument(false);
                 setResult(null);
                 setStatus(null);
                 setError(null);

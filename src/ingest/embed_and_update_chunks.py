@@ -20,6 +20,7 @@ class ChunkRow:
     document_id: int
     content: str
     metadata: dict[str, Any]
+    needs_update: bool = True
 
 @dataclass(slots=True)
 class StructureState:
@@ -144,8 +145,11 @@ class ChunkUpdater:
         self._header_patterns = self._build_literal_patterns(config.DOCUMENT_HEADERS)
         self._footer_patterns = self._build_literal_patterns(config.DOCUMENT_FOOTERS)
 
-    def run(self, limit: int | None = None) -> None:
-        logger.info("Starting chunk update job", extra={"limit": limit})
+    def run(self, limit: int | None = None, only_missing_embeddings: bool = False) -> int:
+        logger.info(
+            "Starting chunk update job",
+            extra={"limit": limit, "only_missing_embeddings": only_missing_embeddings},
+        )
         with psycopg.connect(self.conninfo) as conn:
             conn.execute("SET statement_timeout TO '5min'")
             tracker = StructureTracker()
@@ -153,37 +157,62 @@ class ChunkUpdater:
             processed = 0
             current_document: int | None = None
             document_rows: list[ChunkRow] = []
-            query = (
-                "SELECT id, document_id, COALESCE(chunk_index, id) AS order_index, "
-                "content, COALESCE(metadata, '{}'::jsonb) AS metadata "
-                "FROM rag_chunk "
-                "ORDER BY document_id, order_index"
-            )
+            query_parts = [
+                "SELECT id, document_id, COALESCE(chunk_index, id) AS order_index,",
+                "content, COALESCE(metadata, '{}'::jsonb) AS metadata,",
+                "embedding IS NULL AS needs_update",
+                "FROM rag_chunk",
+            ]
+            params: tuple[int, ...] | None = None
+            if only_missing_embeddings:
+                query_parts.append(
+                    "WHERE document_id IN (SELECT DISTINCT document_id FROM rag_chunk WHERE embedding IS NULL)"
+                )
+            query_parts.append("ORDER BY document_id, order_index")
             if limit:
-                query = query + f" LIMIT {int(limit)}"
+                query_parts.append("LIMIT %s")
+                params = (int(limit),)
+            query = " ".join(query_parts)
             with conn.cursor() as cur:
-                cur.execute(_sql.SQL(query))    # type: ignore
+                cur.execute(_sql.SQL(query), params)    # type: ignore
                 for row in cur:
                     chunk = ChunkRow(
                         id=row[0],
                         document_id=row[1],
                         content=row[3] or "",
                         metadata=row[4] or {},
+                        needs_update=bool(row[5]),
                     )
                     if current_document is None:
                         current_document = chunk.document_id
                     if chunk.document_id != current_document:
-                        processed += self._process_document(conn, tracker, document_rows, batch)
+                        processed += self._process_document(
+                            conn,
+                            tracker,
+                            document_rows,
+                            batch,
+                            update_missing_only=only_missing_embeddings,
+                        )
                         document_rows = [chunk]
                         current_document = chunk.document_id
                     else:
                         document_rows.append(chunk)
                 if document_rows:
-                    processed += self._process_document(conn, tracker, document_rows, batch)
+                    processed += self._process_document(
+                        conn,
+                        tracker,
+                        document_rows,
+                        batch,
+                        update_missing_only=only_missing_embeddings,
+                    )
             if batch:
                 self._flush_batch(conn, batch)
             conn.commit()
-        logger.info("Completed chunk update job", extra={"chunks": processed})
+        logger.info(
+            "Completed chunk update job",
+            extra={"chunks": processed, "only_missing_embeddings": only_missing_embeddings},
+        )
+        return processed
 
     def _process_document(
         self,
@@ -191,6 +220,7 @@ class ChunkUpdater:
         tracker: StructureTracker,
         rows: list[ChunkRow],
         batch: list[tuple[str, str, Jsonb, int]],
+        update_missing_only: bool,
     ) -> int:
         filtered = self._prepare_rows(rows)
         if not filtered:
@@ -202,15 +232,19 @@ class ChunkUpdater:
             return 0
 
         tracker.reset()
+        updated = 0
         for chunk in filtered:
             updates = tracker.consume(chunk.content)
             merged = self._merge_metadata(chunk.metadata, updates)
+            if update_missing_only and not chunk.needs_update:
+                continue
             embedding = self.embedder.embed(chunk.content)
             pgvector = embedding_to_pgvector(embedding.vector)
             batch.append((pgvector, chunk.content, Jsonb(merged or {}), chunk.id))
+            updated += 1
             if len(batch) >= self.batch_size:
                 self._flush_batch(conn, batch)
-        return len(filtered)
+        return updated
 
     def _flush_batch(self, conn: psycopg.Connection[Any], batch: list[tuple[str, str, Jsonb, int]]) -> None:
         logger.info("Flushing %s chunk updates", len(batch))
@@ -301,4 +335,22 @@ def embed_and_update_chunks():
         batch_size=batch_size,
         embedding_model=embedding_model,
     )
-    updater.run(limit=None)
+    return updater.run(limit=None)
+
+
+def backfill_missing_chunk_embeddings(limit: int | None = None) -> int:
+    database_url = config.DATABASE_URL
+    batch_size = config.CHUNK_UPDATE_BATCH_SIZE
+    embedding_model = config.EMBEDDING_MODEL
+
+    if not database_url:
+        error = "DATABASE_URL must be provided"
+        logger.error(error)
+        raise SystemExit(error)
+
+    updater = ChunkUpdater(
+        conninfo=database_url,
+        batch_size=batch_size,
+        embedding_model=embedding_model,
+    )
+    return updater.run(limit=limit, only_missing_embeddings=True)
