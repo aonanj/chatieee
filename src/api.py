@@ -106,12 +106,11 @@ def _resolve_documents_dir() -> Path:
                 LOGGER.error("Directory is not writable: %s", directory)
                 raise PermissionError(f"Directory is not writable: {directory}")  # noqa
             _RESOLVED_DOCUMENTS_DIR = directory
+            LOGGER.info("Upload directory is usable: %s", directory)
+            return directory
         except Exception as exc:  # pragma: no cover - defensive logging
             errors.append(f"{directory}: {exc}")
             LOGGER.error("Upload directory unusable (%s): %s", directory, exc)
-        else:
-            LOGGER.info("Upload directory is usable: %s", directory)
-            return directory
 
     LOGGER.error("No writable upload directory selected. Attempts: %s", "; ".join(errors))
     raise HTTPException(status_code=500, detail="Server storage is unavailable for uploads.")
