@@ -276,29 +276,22 @@ class ChunkUpdater:
         return merged
 
     def _prepare_rows(self, rows: list[ChunkRow]) -> list[ChunkRow]:
-        filtered: list[ChunkRow] = []
         cleaned_chunks: list[ChunkRow] = []
-        start_index: int | None = None
+        heading_trimmed = False
         for chunk in rows:
             cleaned = self._strip_headers_and_footers(chunk.content)
             if not cleaned:
                 continue
-            if start_index is None:
+            if not heading_trimmed:
                 match = self.START_HEADING_RE.search(cleaned)
                 if match:
                     cleaned = cleaned[match.start():].lstrip()
                     if not cleaned:
                         continue
-                    start_index = len(cleaned_chunks)
+                    heading_trimmed = True
             chunk.content = cleaned
             cleaned_chunks.append(chunk)
-
-        if start_index is not None:
-            filtered = cleaned_chunks[start_index:]
-        else:
-            filtered = cleaned_chunks
-
-        return filtered
+        return cleaned_chunks
 
     def _strip_headers_and_footers(self, content: str) -> str:
         if not content:
