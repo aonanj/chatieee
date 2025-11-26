@@ -115,7 +115,8 @@ class LLMReranker:
             if self._client is not None:
                 response = self._client.responses.create(
                     model=self.model,
-                    input=prompt
+                    input=prompt,
+                    response_format={"type": "json_object"},  # type: ignore[arg-type] - Pydantic type stub does not accept dict
                 )
             output = getattr(response, "output_text", None)
             if not output:
@@ -153,15 +154,10 @@ class LLMReranker:
 
     def _build_prompt(self, query: str, candidates: list[ChunkMatch]) -> str:
         lines = [
-            "You are a language model designed to evaluate the responses of this documentation query system.",
-            "You will use a rating scale of 0 to 10, 0 being poorest response and 10 being the best.",
-            "Responses with “not specified” or “no specific mention” or “rephrase question” or “unclear” or no documents returned or empty response are considered poor responses.",
-            "Responses where the question appears to be answered are considered good.",
-            "Responses that contain detailed answers are considered the best.",
-            "Also, use your own judgement in analyzing if the question asked is actually answered in the response. Remember that a response that contains a request to “rephrase the question” is usually a non-response.",
-            "Please rate the question/response pair entered. Only respond with the rating. No explanation necessary. Only integers.",
-            "for answering the user's question. Return a JSON object with a 'ranking' array",
-            "containing {“id”: chunk_id, “score”: relevance} objects in descending order.",
+            "You are ranking document passages for how well they answer the question.",
+            "Score every passage from 0 to 10 (10 = best) based on relevance to the question.",
+            "Respond ONLY with JSON shaped as {\"ranking\": [{\"id\": <passage_id>, \"score\": <0-10>}, ...]}",
+            "Include every passage id provided, sorted by score descending. Do not add any text outside the JSON.",
             "Query:",
             query.strip(),
             "\nPassages:",
@@ -180,7 +176,7 @@ class LLMReranker:
             logger.error("LLM reranker produced non-JSON output: %s", raw_output[:200])
             return {}
 
-        ranking_entries: list[Any]
+        ranking_entries: list[Any] = []
         if isinstance(parsed, dict):
             ranking = (
                 parsed.get("ranking")
@@ -191,11 +187,16 @@ class LLMReranker:
                 ranking_entries = [parsed]
             elif isinstance(ranking, list):
                 ranking_entries = ranking
+            elif parsed and all(isinstance(v, (int, float, str)) for v in parsed.values()):
+                ranking_entries = [{"id": key, "score": value} for key, value in parsed.items()]
             else:
                 logger.error("LLM reranker output missing 'ranking' array: %s", parsed)
                 return {}
         elif isinstance(parsed, list):
             ranking_entries = parsed
+        elif isinstance(parsed, (int, float, str)):
+            logger.warning("LLM reranker returned scalar output instead of ranking JSON: %s", parsed)
+            return {}
         else:
             logger.error("LLM reranker output has unexpected type: %s", type(parsed))
             return {}

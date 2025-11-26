@@ -20,7 +20,7 @@ type IngestStatusResponse = {
 };
 
 const ingestEndpoint = buildClientApiUrl("/ingest_pdf");
-const ESTIMATED_INGEST_MS = 12 * 60 * 1000; // Rough 12-minute ingest target
+const ESTIMATED_INGEST_MS = 20 * 60 * 1000; // Rough 20-minute ingest target
 
 export default function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
