@@ -316,7 +316,7 @@ export default function Home() {
             <form onSubmit={handleSubmit} className="flex flex-col gap-6">
               <textarea
                 className="textarea-pill"
-                placeholder="Example: Describe the fields present in Very-High Throughput frames."
+                placeholder="Example: Describe the Wakeup Schedule in TDLS peer PSM."
                 value={query}
                 disabled={isLoading}
                 onChange={(event) => setQuery(event.target.value)}

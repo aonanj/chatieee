@@ -115,8 +115,7 @@ class LLMReranker:
             if self._client is not None:
                 response = self._client.responses.create(
                     model=self.model,
-                    input=prompt,
-                    response_format={"type": "json_object"},  # type: ignore[arg-type] - Pydantic type stub does not accept dict
+                    input=prompt
                 )
             output = getattr(response, "output_text", None)
             if not output:
@@ -156,8 +155,8 @@ class LLMReranker:
         lines = [
             "You are ranking document passages for how well they answer the question.",
             "Score every passage from 0 to 10 (10 = best) based on relevance to the question.",
-            "Respond ONLY with JSON shaped as {\"ranking\": [{\"id\": <passage_id>, \"score\": <0-10>}, ...]}",
-            "Include every passage id provided, sorted by score descending. Do not add any text outside the JSON.",
+            "Respond ONLY with a JSON object formatted as {\"ranking\": [{\"id\": <passage_id>, \"score\": <0-10>}, ...]}",
+            "Include every passage id provided, sorted by score descending. Do not add any text outside the JSON object.",
             "Query:",
             query.strip(),
             "\nPassages:",
