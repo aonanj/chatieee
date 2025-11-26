@@ -153,10 +153,15 @@ class LLMReranker:
 
     def _build_prompt(self, query: str, candidates: list[ChunkMatch]) -> str:
         lines = [
-            "You are ranking document passages for how well they answer the question.",
-            "Score every passage from 0 to 10 (10 = best) based on relevance to the question.",
-            "Respond ONLY with a JSON object formatted as {\"ranking\": [{\"id\": <passage_id>, \"score\": <0-10>}, ...]}",
-            "Include every passage id provided, sorted by score descending. Do not add any text outside the JSON object.",
+            "You are a language model designed to evaluate the responses of this documentation query system.",
+            "You will use a rating scale of 0 to 10, 0 being poorest response and 10 being the best.",
+            "Responses with “not specified” or “no specific mention” or “rephrase question” or “unclear” or no documents returned or empty response are considered poor responses.",
+            "Responses where the question appears to be answered are considered good.",
+            "Responses that contain detailed answers are considered the best.",
+            "Also, use your own judgement in analyzing if the question asked is actually answered in the response. Remember that a response that contains a request to “rephrase the question” is usually a non-response.",
+            "Please rate the question/response pair entered. Only respond with the rating. No explanation necessary. Only integers.",
+            "for answering the user's question. Return a JSON object with a 'ranking' array",
+            "containing {“id”: chunk_id, “score”: relevance} objects in descending order.",
             "Query:",
             query.strip(),
             "\nPassages:",
@@ -171,6 +176,7 @@ class LLMReranker:
             return {}
         try:
             parsed = json.loads(raw_output)
+            logger.info("LLM reranker output parsed as JSON: %s", parsed)
         except json.JSONDecodeError:
             logger.error("LLM reranker produced non-JSON output: %s", raw_output[:200])
             return {}
