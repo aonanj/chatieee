@@ -555,6 +555,8 @@ def answer_query(query: str):
             "figures": [f.to_dict() for f in figures],
         }
         logger.info("Generated answer for query '%s'", query)
+        logger.info("Answer: %s", answer)
+        logger.info("Payload: %s", json.dumps(payload, indent=2))
     except Exception as exc:
         error = f"Failed to generate answer: {exc}"
         logger.error(error)

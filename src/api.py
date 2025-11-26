@@ -286,6 +286,7 @@ async def query_endpoint(payload: QueryRequest, conn: Conn) -> dict[str, Any]:
 
     try:
         raw_response = await asyncio.to_thread(answer_query, query)
+        LOGGER.info("Received raw response for query '%s': %s", query, raw_response)
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.error("Error processing query: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Query processing failed.") from exc
