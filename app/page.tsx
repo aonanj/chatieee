@@ -50,6 +50,8 @@ type StorageLinkState = {
 const queryEndpoint = buildClientApiUrl("/query");
 const PAGE_PREVIEW_PAGE_SIZE = 4;
 const FIGURE_PREVIEW_PAGE_SIZE = 4;
+const ensureTableLabelSpacing = (text: string) =>
+  text.replace(/\b(Table)(?!\s)(?=[A-Za-z]*\d)/gi, "$1 ");
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -367,7 +369,7 @@ export default function Home() {
                 <div className="panel-sub">
                   <h2 className="text-lg font-semibold text-[#39506B]">Answer</h2>
                   <p className="mt-3 whitespace-pre-line text-base leading-relaxed text-slate-700">
-                    {result.answer}
+                    {ensureTableLabelSpacing(result.answer)}
                   </p>
                 </div>
 
@@ -499,12 +501,14 @@ export default function Home() {
                           <div key={figure.id} className="figure-card space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-500">
                               <span className="font-semibold text-slate-700">
-                                {figure.figure_label}
+                                {ensureTableLabelSpacing(figure.figure_label)}
                               </span>
                               {figure.page_number && <span>Page {figure.page_number}</span>}
                             </div>
                             {figure.caption && (
-                              <p className="text-sm text-slate-700">{figure.caption}</p>
+                              <p className="text-sm text-slate-700">
+                                {ensureTableLabelSpacing(figure.caption)}
+                              </p>
                             )}
                             <div className="relative flex h-48 w-full items-center justify-center overflow-hidden rounded-2xl bg-white/70 p-2 shadow-inner">
                               {readyLink ? (
@@ -512,7 +516,7 @@ export default function Home() {
                                   {/* Serve figures without Next.js optimization so Firebase Hosting can stream the signed URL */}
                                   <Image
                                     src={readyLink}
-                                    alt={figure.figure_label}
+                                    alt={ensureTableLabelSpacing(figure.figure_label)}
                                     fill
                                     sizes="(min-width: 768px) 33vw, 100vw"
                                     className="rounded-xl border border-slate-200 bg-white object-contain"

@@ -24,9 +24,9 @@ except Exception:  # pragma: no cover
     logger.info("OpenAI library not found, LLM reranking will be disabled")
     OpenAI = None  # type: ignore
 
-# Allow appendix-style labels like "FIG. B.5" in addition to "FIG. 3A"
+# Allow appendix-style labels like "FIG. B-5", "FIGURE 9-22C", and dotted forms.
 FIGURE_RE = re.compile(
-    r"\b(FIG(?:URE)?\.?\s*(?:[A-Z]+(?:[\.\-]\s*)?)?\d+(?:\.\d+)*[A-Z]?)",
+    r"\b(FIG(?:URE)?\.?\s*(?:[A-Z]+(?:[.\-]\s*)?)?\d+(?:[.\-–]\d+)*(?:[A-Za-z]+)?)",
     re.IGNORECASE,
 )
 
